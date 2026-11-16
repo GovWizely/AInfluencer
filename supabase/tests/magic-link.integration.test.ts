@@ -1,4 +1,4 @@
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { admin, anonClient, mailpitUrl, uniqueEmail } from "./helpers";
 
@@ -30,6 +30,29 @@ async function findLoginLink(email: string): Promise<URL> {
   }
   throw new Error(`No email for ${email} in Mailpit`);
 }
+
+// Right after `supabase start`, Auth can still be serving the default templates
+// because it loaded them before Kong (which hosts ours) was up.
+async function waitForCustomTemplates() {
+  const probeEmail = uniqueEmail("template-probe");
+  for (let attempt = 0; attempt < 30; attempt++) {
+    const { error } = await anonClient().auth.signInWithOtp({
+      email: probeEmail,
+      options: { emailRedirectTo: siteUrl },
+    });
+    if (!error) {
+      const link = await findLoginLink(probeEmail);
+      await fetch(`${mailpitUrl}/api/v1/messages`, { method: "DELETE" });
+      if (link.origin === siteUrl) break;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+  }
+  const { data } = await admin.auth.admin.listUsers();
+  const probe = data.users.find((user) => user.email === probeEmail);
+  if (probe) created.push(probe.id);
+}
+
+beforeAll(waitForCustomTemplates, 90_000);
 
 describe("magic link email", () => {
   it.each(["new", "returning"])(
