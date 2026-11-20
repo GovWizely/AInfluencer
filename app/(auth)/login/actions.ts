@@ -49,23 +49,3 @@ export async function sendMagicLink(
 
   redirect(`/login/check-email?${new URLSearchParams({ email })}`);
 }
-
-export async function signInWithGoogle(formData: FormData) {
-  const next = safeNextPath(String(formData.get("next") ?? ""));
-  const siteUrl = await getSiteUrl();
-
-  const supabase = await createClient();
-  const { data, error } = await supabase.auth.signInWithOAuth({
-    provider: "google",
-    options: {
-      redirectTo: `${siteUrl}/auth/callback?${new URLSearchParams({ next })}`,
-    },
-  });
-
-  if (error || !data.url) {
-    console.error("signInWithOAuth failed", { code: error?.code });
-    redirect("/auth/error?reason=oauth");
-  }
-
-  redirect(data.url);
-}

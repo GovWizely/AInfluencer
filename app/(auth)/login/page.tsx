@@ -1,7 +1,6 @@
 import { redirect } from "next/navigation";
 import { Suspense } from "react";
 
-import { isGoogleLoginEnabled } from "@/lib/auth/providers";
 import { safeNextPath } from "@/lib/auth/routes";
 import { getCurrentUser } from "@/lib/auth/session";
 
@@ -32,11 +31,8 @@ async function LoginFormSection({
   const nextParam = Array.isArray(params.next) ? params.next[0] : params.next;
   const next = safeNextPath(nextParam);
 
-  const [user, googleEnabled] = await Promise.all([
-    getCurrentUser(),
-    isGoogleLoginEnabled(),
-  ]);
+  const user = await getCurrentUser();
   if (user) redirect(next);
 
-  return <LoginForm next={next} googleEnabled={googleEnabled} />;
+  return <LoginForm next={next} />;
 }
