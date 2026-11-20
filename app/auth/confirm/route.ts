@@ -21,5 +21,5 @@ export async function GET(request: NextRequest) {
     console.error("verifyOtp failed", { code: error.code });
   }
 
-  redirect("/auth/error?reason=link");
+  redirect("/auth/error");
 }

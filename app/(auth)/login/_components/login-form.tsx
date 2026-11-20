@@ -2,20 +2,15 @@
 
 import { useActionState } from "react";
 
-import {
-  sendMagicLink,
-  signInWithGoogle,
-  type LoginFormState,
-} from "../actions";
+import { sendMagicLink, type LoginFormState } from "../actions";
 
 const initialState: LoginFormState = { error: null };
 
 type LoginFormProps = {
   next: string;
-  googleEnabled: boolean;
 };
 
-export function LoginForm({ next, googleEnabled }: LoginFormProps) {
+export function LoginForm({ next }: LoginFormProps) {
   const [state, formAction, pending] = useActionState(
     sendMagicLink,
     initialState,
@@ -51,25 +46,6 @@ export function LoginForm({ next, googleEnabled }: LoginFormProps) {
           {pending ? "Sending..." : "Email me a login link"}
         </button>
       </form>
-
-      {googleEnabled ? (
-        <>
-          <div className="flex items-center gap-3 text-xs text-neutral-500 uppercase">
-            <span className="h-px flex-1 bg-neutral-200 dark:bg-neutral-800" />
-            or
-            <span className="h-px flex-1 bg-neutral-200 dark:bg-neutral-800" />
-          </div>
-          <form action={signInWithGoogle}>
-            <input type="hidden" name="next" value={next} />
-            <button
-              type="submit"
-              className="w-full rounded-md border border-neutral-300 px-4 py-2 font-medium dark:border-neutral-700"
-            >
-              Continue with Google
-            </button>
-          </form>
-        </>
-      ) : null}
     </div>
   );
 }
