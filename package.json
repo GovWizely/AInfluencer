@@ -18,6 +18,8 @@
     "supabase:stop": "supabase stop",
     "supabase:reset": "supabase db reset",
     "supabase:env": "node scripts/write-local-env.mjs",
+    "seed:demo": "node scripts/seed-demo.mjs",
+    "supabase:types": "supabase gen types typescript > lib/supabase/database.types.ts && prettier --write lib/supabase/database.types.ts",
     "prepare": "husky"
   },
   "dependencies": {
