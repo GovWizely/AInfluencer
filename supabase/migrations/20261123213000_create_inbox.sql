@@ -153,6 +153,10 @@ as $$
 declare
   target uuid := coalesce(new.conversation_id, old.conversation_id);
 begin
+  -- Serialize concurrent writers on this conversation; the update below then
+  -- runs with a fresh snapshot that includes any message committed meanwhile.
+  perform 1 from public.conversations where id = target for update;
+
   update public.conversations c
   set
     last_message_at = s.last_message_at,
