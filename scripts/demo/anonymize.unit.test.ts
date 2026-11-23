@@ -94,3 +94,23 @@ describe("demo fixture", async () => {
     expect(fixture).not.toMatch(/@[\w.]+|https?:\/\/|www\.|\.com\b/);
   });
 });
+
+describe("demo fixture threads", async () => {
+  const { readFileSync } = await import("node:fs");
+  const fixture = JSON.parse(
+    readFileSync("supabase/fixtures/demo-instagram.json", "utf8"),
+  );
+
+  it("orders messages oldest first", () => {
+    for (const account of fixture.accounts) {
+      for (const conversation of account.conversations) {
+        const ages = conversation.messages.map(
+          (m: { minutes_ago: number }) => m.minutes_ago,
+        );
+        expect(ages).toEqual([...ages].sort((a, b) => b - a));
+        expect(new Set(ages).size).toBe(ages.length);
+        expect(Math.min(...ages)).toBeGreaterThan(0);
+      }
+    }
+  });
+});

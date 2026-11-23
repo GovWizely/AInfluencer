@@ -111,8 +111,10 @@ const accounts = CREATORS.map((creator, index) => {
 
     // Spread threads over the last ~10 days, newest first.
     const start =
-      Math.round(i * 0.45 * DAY_MINUTES + random() * 300) + lines.length * 20;
+      Math.round(i * 0.45 * DAY_MINUTES + random() * 300) + lines.length * 25;
+    let elapsed = 0;
     const messages = lines.map((line, m) => {
+      if (m > 0) elapsed += 10 + Math.round(random() * 15);
       const outbound = line.startsWith("creator:");
       const text = (outbound ? line.slice("creator:".length) : line)
         .replaceAll("{name}", firstName)
@@ -122,7 +124,7 @@ const accounts = CREATORS.map((creator, index) => {
         key: `m${m + 1}`,
         direction: outbound ? "outbound" : "inbound",
         body: text,
-        minutes_ago: start - m * (10 + Math.round(random() * 15)),
+        minutes_ago: start - elapsed,
       };
     });
 
