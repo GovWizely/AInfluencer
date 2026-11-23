@@ -155,7 +155,7 @@ declare
 begin
   -- Serialize concurrent writers on this conversation; the update below then
   -- runs with a fresh snapshot that includes any message committed meanwhile.
-  perform 1 from public.conversations where id = target for update;
+  perform 1 from public.conversations where id = target for no key update;
 
   update public.conversations c
   set
