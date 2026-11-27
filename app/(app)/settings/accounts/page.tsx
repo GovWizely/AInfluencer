@@ -42,7 +42,8 @@ async function AccountList() {
     <div className="flex flex-col gap-4">
       <p className="text-sm text-neutral-500">
         Connecting new accounts isn&apos;t available yet. Disconnecting an
-        account removes its imported data from AInfluencer.
+        account deletes its imported data, its conversations, and any replies
+        you&apos;ve saved for that account.
       </p>
       {Object.keys(socialProviders)
         .filter(isSocialPlatform)
