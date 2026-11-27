@@ -34,6 +34,91 @@ export type Database = {
   };
   public: {
     Tables: {
+      account_credentials: {
+        Row: {
+          access_token: string;
+          account_id: string;
+          expires_at: string | null;
+          refresh_token: string | null;
+          scopes: string[];
+        };
+        ComputedFields: never;
+        Insert: {
+          access_token: string;
+          account_id: string;
+          expires_at?: string | null;
+          refresh_token?: string | null;
+          scopes?: string[];
+        };
+        Update: {
+          access_token?: string;
+          account_id?: string;
+          expires_at?: string | null;
+          refresh_token?: string | null;
+          scopes?: string[];
+        };
+        Relationships: [
+          {
+            foreignKeyName: "account_credentials_account_id_fkey";
+            columns: ["account_id"];
+            isOneToOne: true;
+            referencedRelation: "social_accounts";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      comments: {
+        Row: {
+          author: string;
+          body: string;
+          created_at: string;
+          external_id: string;
+          id: string;
+          needs_reply: boolean;
+          parent_id: string | null;
+          post_id: string;
+          replied_at: string | null;
+        };
+        ComputedFields: never;
+        Insert: {
+          author: string;
+          body: string;
+          created_at: string;
+          external_id: string;
+          id?: string;
+          needs_reply?: boolean;
+          parent_id?: string | null;
+          post_id: string;
+          replied_at?: string | null;
+        };
+        Update: {
+          author?: string;
+          body?: string;
+          created_at?: string;
+          external_id?: string;
+          id?: string;
+          needs_reply?: boolean;
+          parent_id?: string | null;
+          post_id?: string;
+          replied_at?: string | null;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "comments_post_id_fkey";
+            columns: ["post_id"];
+            isOneToOne: false;
+            referencedRelation: "posts";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "comments_post_id_parent_id_fkey";
+            columns: ["post_id", "parent_id"];
+            isOneToOne: false;
+            referencedRelation: "comments";
+            referencedColumns: ["post_id", "id"];
+          },
+        ];
+      };
       conversations: {
         Row: {
           account_id: string;
