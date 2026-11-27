@@ -20,7 +20,17 @@ pnpm dev
 - Mailpit (catches login emails): http://127.0.0.1:54324
 - Studio: http://127.0.0.1:54323
 
-After changing migrations, run `pnpm supabase:reset`.
+After changing migrations, run `pnpm supabase:reset` and `pnpm supabase:types`.
+
+### Demo inbox data
+
+```bash
+pnpm seed:demo --email you@example.com
+```
+
+Loads 5 anonymized Instagram creators (posts plus synthetic DMs) from `supabase/fixtures/demo-instagram.json` under that login, creating the user if needed. It only runs against local Supabase and is safe to re-run. Replies typed in the inbox are stored locally and never sent to Instagram.
+
+The fixture was generated once with `node scripts/build-demo-fixture.mjs <dataset.json>` from a scraped profile dataset. The raw dataset contains real accounts; don't commit it.
 
 ## How auth works
 
@@ -43,6 +53,8 @@ After changing migrations, run `pnpm supabase:reset`.
 | `pnpm ts`               | Type check                                                       |
 | `pnpm test:unit`        | Unit tests (`*.unit.test.ts`)                                    |
 | `pnpm test:integration` | Tests against the local Supabase stack (`*.integration.test.ts`) |
+| `pnpm seed:demo`        | Load demo inbox data for `--email` (local only)                  |
+| `pnpm supabase:types`   | Regenerate `lib/supabase/database.types.ts`                      |
 
 ## Hosted Supabase setup
 
