@@ -85,6 +85,7 @@ export function sampleInbox(handle: string, occupiedHandles: Iterable<string>) {
   const themes = shuffled(topics, `${handle}:topics`);
   const prompts = shuffled(openers, `${handle}:prompts`);
   const usedHandles = new Set(occupiedHandles);
+  usedHandles.add(handle);
 
   return {
     accounts: [
@@ -143,6 +144,18 @@ export async function seedSampleInbox(
     const prefix = `demo:${ownerId}:preview:`;
     const occupiedHandles = new Set<string>();
     const batchSize = 500;
+    for (let offset = 0; ; offset += batchSize) {
+      const { data, error } = await admin
+        .from("social_accounts")
+        .select("handle")
+        .eq("owner_id", ownerId)
+        .eq("platform", "instagram")
+        .order("id")
+        .range(offset, offset + batchSize - 1);
+      if (error) throw error;
+      for (const row of data) occupiedHandles.add(row.handle.toLowerCase());
+      if (data.length < batchSize) break;
+    }
     for (let offset = 0; ; offset += batchSize) {
       const { data, error } = await admin
         .from("conversations")

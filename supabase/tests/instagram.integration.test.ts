@@ -5,6 +5,7 @@ import { GET, POST } from "@/app/api/instagram/webhook/route";
 import { importMessages } from "@/lib/instagram/inbox";
 import { instagram } from "@/lib/instagram/meta";
 import { handleSchema } from "@/lib/instagram/onboarding";
+import { sampleInbox } from "@/lib/instagram/sample-inbox";
 
 import { admin, createUser, deleteUser, uniqueEmail } from "./helpers";
 
@@ -105,6 +106,49 @@ it("populates a new local inbox with sample conversations for the submitted hand
       messages: row.messages.toSorted((a, b) => a.id.localeCompare(b.id)),
     }));
   expect(stable(repeated)).toEqual(stable(unified));
+});
+
+it("does not use the creator's own Instagram handles for sample senders", async () => {
+  vi.stubEnv("NODE_ENV", "development");
+  vi.stubEnv("INSTAGRAM_APP_ID", "");
+  const { user, client } = await createUser(
+    uniqueEmail("instagram-preview-owner"),
+  );
+  users.push(user.id);
+  const handle = "ana.costa";
+  const [connectedHandle, previewHandle] = sampleInbox(handle, [])
+    .accounts[0].conversations.map((thread) => thread.participant_handle)
+    .filter((sender) => sender !== `${handle}_2`);
+  const { error } = await admin.from("social_accounts").insert([
+    {
+      owner_id: user.id,
+      platform: "instagram",
+      external_id: `instagram:${user.id}`,
+      handle: connectedHandle.toUpperCase(),
+    },
+    {
+      owner_id: user.id,
+      platform: "instagram",
+      external_id: `demo:${user.id}:preview:${previewHandle}`,
+      handle: previewHandle,
+    },
+  ]);
+  expect(error).toBeNull();
+
+  requireUser.mockResolvedValueOnce(user);
+  const { connectInstagram } = await import("@/app/(app)/inbox/connect");
+  const form = new FormData();
+  form.set("handle", `@${handle}`);
+  await expect(connectInstagram(form)).rejects.toThrow("/inbox?instagram=demo");
+  const conversations = await client
+    .from("conversations")
+    .select("participant_handle");
+  expect(conversations.error).toBeNull();
+  const senders = conversations.data?.map((row) => row.participant_handle);
+  expect(senders).toContain(`${handle}_2`);
+  expect(senders).not.toContain(handle);
+  expect(senders).not.toContain(connectedHandle);
+  expect(senders).not.toContain(previewHandle);
 });
 
 it("keeps Instagram credentials server-only and prevents another creator from claiming the same account", async () => {
