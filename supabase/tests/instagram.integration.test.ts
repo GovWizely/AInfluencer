@@ -53,7 +53,9 @@ it("populates a new local inbox with sample conversations for the submitted hand
   async function readSamples() {
     const { data, error } = await client
       .from("conversations")
-      .select("id, participant_handle, account_id, messages(id, body)")
+      .select(
+        "id, external_id, participant_handle, account_id, messages(id, body, sent_at)",
+      )
       .order("id");
     if (error) throw error;
     return data;
@@ -106,6 +108,44 @@ it("populates a new local inbox with sample conversations for the submitted hand
       messages: row.messages.toSorted((a, b) => a.id.localeCompare(b.id)),
     }));
   expect(stable(repeated)).toEqual(stable(unified));
+
+  const [original, missing] = first;
+  const reply = await client
+    .from("messages")
+    .insert({
+      conversation_id: original.id,
+      direction: "outbound",
+      sent_by: "creator",
+      body: "This is a reply to the original sample sender.",
+    })
+    .select("id")
+    .single();
+  expect(reply.error).toBeNull();
+  await preview(`@${original.participant_handle}`);
+  const removed = await admin
+    .from("conversations")
+    .delete()
+    .eq("id", missing.id);
+  expect(removed.error).toBeNull();
+
+  const beforeReopen = stable(await readSamples());
+  await preview("@example.creator");
+  const afterReopen = stable(await readSamples());
+  const preserved = afterReopen.find((thread) => thread.id === original.id);
+  expect(preserved?.participant_handle).toBe(original.participant_handle);
+  expect(preserved?.messages.map((message) => message.id)).toContain(
+    reply.data?.id,
+  );
+  const restored = afterReopen.find(
+    (thread) =>
+      thread.account_id === missing.account_id &&
+      thread.external_id === missing.external_id,
+  );
+  expect(restored?.messages.length).toBeGreaterThan(0);
+  expect(restored?.id).not.toBe(missing.id);
+  expect(afterReopen.filter((thread) => thread.id !== restored?.id)).toEqual(
+    beforeReopen,
+  );
 });
 
 it("does not use the creator's own Instagram handles for sample senders", async () => {

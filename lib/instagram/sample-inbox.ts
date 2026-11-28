@@ -74,7 +74,11 @@ function shuffled<T>(items: readonly T[], seed: string) {
     .map(({ value }) => value);
 }
 
-export function sampleInbox(handle: string, occupiedHandles: Iterable<string>) {
+export function sampleInbox(
+  handle: string,
+  occupiedHandles: Iterable<string>,
+  existingThreadKeys: ReadonlySet<string> = new Set(),
+) {
   const layout = demo.accounts.find(
     (account) => account.conversations.length > 0,
   );
@@ -95,40 +99,49 @@ export function sampleInbox(handle: string, occupiedHandles: Iterable<string>) {
         handle,
         display_name: null,
         bio: null,
-        conversations: layout.conversations.map((thread, index) => {
-          const [username, displayName] = fans[index % fans.length];
-          const surname = lastNames[index % lastNames.length];
-          const givenHandle = username.split(/[._]/)[0];
-          const familyHandle = surname
-            .toLowerCase()
-            .normalize("NFD")
-            .replace(/\p{M}/gu, "");
-          const baseHandle = `${givenHandle}.${familyHandle}`;
-          let participantHandle = baseHandle;
-          for (let variant = 2; usedHandles.has(participantHandle); variant++) {
-            participantHandle = `${baseHandle}_${variant}`;
-          }
-          usedHandles.add(participantHandle);
-          const participantName = `${displayName.split(" ")[0]} ${surname}`;
-          const topic = themes[index % themes.length];
-          const prompt = prompts[index % prompts.length];
-          const punctuation = prompt === "I loved your post about" ? "!" : "?";
+        conversations: layout.conversations
+          .map((thread, index) => {
+            if (existingThreadKeys.has(thread.key)) return null;
 
-          return {
-            ...thread,
-            participant_handle: participantHandle,
-            participant_name: participantName,
-            messages: thread.messages.map((message, turn) => ({
-              ...message,
-              body:
-                turn === 0
-                  ? `Hey @${handle}! ${prompt} ${topic}${punctuation}`
-                  : message.direction === "outbound"
-                    ? `Thanks for writing, @${participantHandle}! I'm planning to share more about ${topic} soon.`
-                    : `Thanks, @${handle}! I'll keep an eye out for more about ${topic}.`,
-            })),
-          };
-        }),
+            const [username, displayName] = fans[index % fans.length];
+            const surname = lastNames[index % lastNames.length];
+            const givenHandle = username.split(/[._]/)[0];
+            const familyHandle = surname
+              .toLowerCase()
+              .normalize("NFD")
+              .replace(/\p{M}/gu, "");
+            const baseHandle = `${givenHandle}.${familyHandle}`;
+            let participantHandle = baseHandle;
+            for (
+              let variant = 2;
+              usedHandles.has(participantHandle);
+              variant++
+            ) {
+              participantHandle = `${baseHandle}_${variant}`;
+            }
+            usedHandles.add(participantHandle);
+            const participantName = `${displayName.split(" ")[0]} ${surname}`;
+            const topic = themes[index % themes.length];
+            const prompt = prompts[index % prompts.length];
+            const punctuation =
+              prompt === "I loved your post about" ? "!" : "?";
+
+            return {
+              ...thread,
+              participant_handle: participantHandle,
+              participant_name: participantName,
+              messages: thread.messages.map((message, turn) => ({
+                ...message,
+                body:
+                  turn === 0
+                    ? `Hey @${handle}! ${prompt} ${topic}${punctuation}`
+                    : message.direction === "outbound"
+                      ? `Thanks for writing, @${participantHandle}! I'm planning to share more about ${topic} soon.`
+                      : `Thanks, @${handle}! I'll keep an eye out for more about ${topic}.`,
+              })),
+            };
+          })
+          .filter((thread) => thread !== null),
       },
     ],
   };
@@ -142,7 +155,9 @@ export async function seedSampleInbox(
   const previous = pendingPreviews.get(ownerId) ?? Promise.resolve();
   const seed = previous.then(async () => {
     const prefix = `demo:${ownerId}:preview:`;
+    const previewId = `${prefix}${handle}`;
     const occupiedHandles = new Set<string>();
+    const existingThreadKeys = new Set<string>();
     const batchSize = 500;
     for (let offset = 0; ; offset += batchSize) {
       const { data, error } = await admin
@@ -159,18 +174,26 @@ export async function seedSampleInbox(
     for (let offset = 0; ; offset += batchSize) {
       const { data, error } = await admin
         .from("conversations")
-        .select("participant_handle, account:social_accounts!inner()")
+        .select(
+          "external_id, participant_handle, account:social_accounts!inner(external_id)",
+        )
         .eq("account.owner_id", ownerId)
         .eq("account.platform", "instagram")
         .like("account.external_id", `${prefix}%`)
-        .neq("account.external_id", `${prefix}${handle}`)
         .order("id")
         .range(offset, offset + batchSize - 1);
       if (error) throw error;
-      for (const row of data) occupiedHandles.add(row.participant_handle);
+      for (const row of data) {
+        occupiedHandles.add(row.participant_handle);
+        if (row.account.external_id === previewId)
+          existingThreadKeys.add(row.external_id);
+      }
       if (data.length < batchSize) break;
     }
-    await seedDemo(admin, ownerId, sampleInbox(handle, occupiedHandles));
+    const fixture = sampleInbox(handle, occupiedHandles, existingThreadKeys);
+    if (fixture.accounts[0].conversations.length > 0) {
+      await seedDemo(admin, ownerId, fixture);
+    }
   });
   const settled = seed.catch(() => {});
   pendingPreviews.set(ownerId, settled);
