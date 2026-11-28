@@ -2,8 +2,12 @@ import "server-only";
 
 import { createHash } from "node:crypto";
 
+import type { createAdminClient } from "@/lib/supabase/admin";
 import { FAN_NAMES } from "@/scripts/demo/dm-templates.mjs";
+import { seedDemo } from "@/scripts/demo/seed.mjs";
 import demo from "@/supabase/fixtures/demo-instagram.json";
+
+const pendingPreviews = new Map<string, Promise<void>>();
 
 const surnames = [
   "Ahmed",
@@ -70,7 +74,7 @@ function shuffled<T>(items: readonly T[], seed: string) {
     .map(({ value }) => value);
 }
 
-export function sampleInbox(handle: string) {
+export function sampleInbox(handle: string, occupiedHandles: Iterable<string>) {
   const layout = demo.accounts.find(
     (account) => account.conversations.length > 0,
   );
@@ -80,7 +84,7 @@ export function sampleInbox(handle: string) {
   const lastNames = shuffled(surnames, `${handle}:surnames`);
   const themes = shuffled(topics, `${handle}:topics`);
   const prompts = shuffled(openers, `${handle}:prompts`);
-  const audienceTag = digest(handle).slice(0, 10);
+  const usedHandles = new Set(occupiedHandles);
 
   return {
     accounts: [
@@ -92,8 +96,19 @@ export function sampleInbox(handle: string) {
         bio: null,
         conversations: layout.conversations.map((thread, index) => {
           const [username, displayName] = fans[index % fans.length];
-          const participantHandle = `${username}.${audienceTag}`;
-          const participantName = `${displayName.split(" ")[0]} ${lastNames[index % lastNames.length]}`;
+          const surname = lastNames[index % lastNames.length];
+          const givenHandle = username.split(/[._]/)[0];
+          const familyHandle = surname
+            .toLowerCase()
+            .normalize("NFD")
+            .replace(/\p{M}/gu, "");
+          const baseHandle = `${givenHandle}.${familyHandle}`;
+          let participantHandle = baseHandle;
+          for (let variant = 2; usedHandles.has(participantHandle); variant++) {
+            participantHandle = `${baseHandle}_${variant}`;
+          }
+          usedHandles.add(participantHandle);
+          const participantName = `${displayName.split(" ")[0]} ${surname}`;
           const topic = themes[index % themes.length];
           const prompt = prompts[index % prompts.length];
           const punctuation = prompt === "I loved your post about" ? "!" : "?";
@@ -116,4 +131,40 @@ export function sampleInbox(handle: string) {
       },
     ],
   };
+}
+
+export async function seedSampleInbox(
+  admin: ReturnType<typeof createAdminClient>,
+  ownerId: string,
+  handle: string,
+) {
+  const previous = pendingPreviews.get(ownerId) ?? Promise.resolve();
+  const seed = previous.then(async () => {
+    const prefix = `demo:${ownerId}:preview:`;
+    const occupiedHandles = new Set<string>();
+    const batchSize = 500;
+    for (let offset = 0; ; offset += batchSize) {
+      const { data, error } = await admin
+        .from("conversations")
+        .select("participant_handle, account:social_accounts!inner()")
+        .eq("account.owner_id", ownerId)
+        .eq("account.platform", "instagram")
+        .like("account.external_id", `${prefix}%`)
+        .neq("account.external_id", `${prefix}${handle}`)
+        .order("id")
+        .range(offset, offset + batchSize - 1);
+      if (error) throw error;
+      for (const row of data) occupiedHandles.add(row.participant_handle);
+      if (data.length < batchSize) break;
+    }
+    await seedDemo(admin, ownerId, sampleInbox(handle, occupiedHandles));
+  });
+  const settled = seed.catch(() => {});
+  pendingPreviews.set(ownerId, settled);
+  try {
+    await seed;
+  } finally {
+    if (pendingPreviews.get(ownerId) === settled)
+      pendingPreviews.delete(ownerId);
+  }
 }

@@ -14,9 +14,9 @@ import {
   handleSchema,
   inboxUrl,
 } from "@/lib/instagram/onboarding";
-import { sampleInbox } from "@/lib/instagram/sample-inbox";
+import { seedSampleInbox } from "@/lib/instagram/sample-inbox";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { isLocalSupabaseUrl, seedDemo } from "@/scripts/demo/seed.mjs";
+import { isLocalSupabaseUrl } from "@/scripts/demo/seed.mjs";
 
 export async function connectInstagram(form: FormData) {
   const user = await requireUser();
@@ -31,7 +31,7 @@ export async function connectInstagram(form: FormData) {
       isLocalSupabaseUrl(publicEnv.NEXT_PUBLIC_SUPABASE_URL)
     ) {
       try {
-        await seedDemo(createAdminClient(), user.id, sampleInbox(handle.data));
+        await seedSampleInbox(createAdminClient(), user.id, handle.data);
       } catch {
         redirect(inboxUrl("failed", handle.data));
       }

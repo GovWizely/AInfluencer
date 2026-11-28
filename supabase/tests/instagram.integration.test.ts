@@ -4,6 +4,7 @@ import { afterAll, afterEach, expect, it, vi } from "vitest";
 import { GET, POST } from "@/app/api/instagram/webhook/route";
 import { importMessages } from "@/lib/instagram/inbox";
 import { instagram } from "@/lib/instagram/meta";
+import { handleSchema } from "@/lib/instagram/onboarding";
 
 import { admin, createUser, deleteUser, uniqueEmail } from "./helpers";
 
@@ -71,6 +72,14 @@ it("populates a new local inbox with sample conversations for the submitted hand
   );
   expect(second.length).toBeGreaterThan(0);
   expect(unified).toHaveLength(first.length + second.length);
+  const senderHandles = unified.map(
+    ({ participant_handle }) => participant_handle,
+  );
+  expect(new Set(senderHandles).size).toBe(unified.length);
+  for (const handle of senderHandles) {
+    expect(handleSchema.safeParse(handle).success).toBe(true);
+    expect(handle).not.toMatch(/\.[a-f0-9]{10}$/i);
+  }
   const firstFans = new Set(
     first.map(({ participant_handle }) => participant_handle),
   );

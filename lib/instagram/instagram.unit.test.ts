@@ -5,6 +5,7 @@ import type { InstagramConfig } from "./config";
 import { authorizationUrl, exchangeCode, instagram } from "./meta";
 import { handleSchema } from "./onboarding";
 import { replyWindowMs, replyWindowOpen } from "./replies";
+import { sampleInbox } from "./sample-inbox";
 import { parseEvents, validSignature } from "./webhook";
 
 vi.mock("server-only", () => ({}));
@@ -29,6 +30,25 @@ describe("Instagram onboarding", () => {
     expect(
       handleSchema.safeParse("https://instagram.com/example").success,
     ).toBe(false);
+  });
+
+  it("uses short numeric variants only when a sample sender handle is taken", () => {
+    function sampleHandles(occupied: string[]) {
+      return sampleInbox(
+        "example.creator",
+        occupied,
+      ).accounts[0].conversations.map((thread) => thread.participant_handle);
+    }
+    const handles = sampleHandles([]);
+    expect(handles.length).toBeGreaterThan(0);
+    expect(handles.every((handle) => /^[a-z]+\.[a-z]+$/.test(handle))).toBe(
+      true,
+    );
+    const [first] = handles;
+    expect(sampleHandles([first, `${first}_2`])).toEqual([
+      `${first}_3`,
+      ...handles.slice(1),
+    ]);
   });
 
   it("requests only the Instagram profile and messaging permissions", () => {
