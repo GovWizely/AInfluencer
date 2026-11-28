@@ -102,6 +102,49 @@ describe("Instagram onboarding", () => {
       message: { text: "Hello!" },
     });
   });
+
+  it("imports available message details in batches even if an individual request fails", async () => {
+    let active = 0;
+    let peak = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: URL) => {
+        const id = url.pathname.split("/").at(-1);
+        if (id === "thread") {
+          return Response.json({
+            messages: {
+              data: Array.from({ length: 9 }, (_, n) => ({
+                id: `message-${n}`,
+              })),
+            },
+          });
+        }
+        active++;
+        peak = Math.max(active, peak);
+        await Promise.resolve();
+        active--;
+        if (id === "message-2") return Response.json({}, { status: 429 });
+        return Response.json({
+          id,
+          created_time: "2022-07-12T19:11:07+0000",
+          from: { id: "fan" },
+          to: { data: [{ id: "creator" }] },
+        });
+      }),
+    );
+    const messages = await instagram(config, "long").messages("thread");
+    expect(messages.map(({ id }) => id)).toEqual([
+      "message-0",
+      "message-1",
+      "message-3",
+      "message-4",
+      "message-5",
+      "message-6",
+      "message-7",
+      "message-8",
+    ]);
+    expect(peak).toBeLessThanOrEqual(4);
+  });
 });
 
 describe("Instagram message delivery", () => {

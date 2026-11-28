@@ -5,6 +5,7 @@ import { z } from "zod";
 import type { InstagramConfig } from "./config";
 
 const graph = "https://graph.instagram.com";
+const messageDetailConcurrency = 4;
 const instagramId = z
   .union([z.string().min(1), z.number().int().safe()])
   .transform(String);
@@ -139,16 +140,28 @@ export function instagram(config: InstagramConfig, token: string) {
         }),
         z.object({ messages: pageSchema(idOnly).optional() }),
       );
-      return Promise.all(
-        (thread.messages?.data ?? []).slice(0, 20).map(({ id }) =>
-          call(
-            url(encodeURIComponent(id), {
-              fields: "id,created_time,from,to,message",
-            }),
-            messageSchema,
+      const ids = (thread.messages?.data ?? []).slice(0, 20);
+      const messages: z.infer<typeof messageSchema>[] = [];
+      for (
+        let offset = 0;
+        offset < ids.length;
+        offset += messageDetailConcurrency
+      ) {
+        const results = await Promise.allSettled(
+          ids.slice(offset, offset + messageDetailConcurrency).map(({ id }) =>
+            call(
+              url(encodeURIComponent(id), {
+                fields: "id,created_time,from,to,message",
+              }),
+              messageSchema,
+            ),
           ),
-        ),
-      );
+        );
+        for (const result of results) {
+          if (result.status === "fulfilled") messages.push(result.value);
+        }
+      }
+      return messages;
     },
     subscribe: (id: string) =>
       call(
