@@ -8,9 +8,9 @@ export const replySchema = z.object({
     .string()
     .trim()
     .min(1, "Write a reply first.")
-    .max(
-      MAX_REPLY_LENGTH,
-      `Replies can be at most ${MAX_REPLY_LENGTH} characters.`,
+    .refine(
+      (body) => new TextEncoder().encode(body).byteLength <= MAX_REPLY_LENGTH,
+      "Your reply is too long to send. Shorten it and try again.",
     ),
 });
 
