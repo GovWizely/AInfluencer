@@ -70,6 +70,44 @@ export async function storeMessages(
   if (error) throw error;
 }
 
+async function storeThread(
+  account: Account,
+  thread: string,
+  messages: Awaited<ReturnType<Instagram["messages"]>>,
+) {
+  const participant = messages
+    .flatMap((message) => [message.from, ...message.to.data])
+    .find((person) => person.id !== account.external_id);
+  if (!participant) return;
+  const id = await threadId(account.id, thread, participant);
+  await storeMessages(
+    id,
+    messages.map((message) => {
+      const inbound = message.from.id === participant.id;
+      return {
+        external_id: message.id,
+        direction: inbound ? "inbound" : "outbound",
+        sent_by: inbound ? "fan" : "creator",
+        body: messageBody(message.message),
+        sent_at: new Date(message.created_time).toISOString(),
+      };
+    }),
+  );
+}
+
+export async function importFirstMessages(
+  account: Account,
+  api: Instagram,
+  signal: AbortSignal,
+) {
+  for await (const thread of api.conversations(undefined, signal)) {
+    const messages = await api.messages(thread.id, 2, signal);
+    signal.throwIfAborted();
+    await storeThread(account, thread.id, messages);
+    return;
+  }
+}
+
 export async function importMessages(account: Account, api: Instagram) {
   let partial = false;
   for await (const thread of api.conversations()) {
@@ -77,24 +115,7 @@ export async function importMessages(account: Account, api: Instagram) {
       partial = true;
       return [];
     });
-    const participant = messages
-      .flatMap((message) => [message.from, ...message.to.data])
-      .find((person) => person.id !== account.external_id);
-    if (!participant) continue;
-    const id = await threadId(account.id, thread.id, participant);
-    await storeMessages(
-      id,
-      messages.map((message) => {
-        const inbound = message.from.id === participant.id;
-        return {
-          external_id: message.id,
-          direction: inbound ? "inbound" : "outbound",
-          sent_by: inbound ? "fan" : "creator",
-          body: messageBody(message.message),
-          sent_at: new Date(message.created_time).toISOString(),
-        };
-      }),
-    );
+    await storeThread(account, thread.id, messages);
   }
   if (partial)
     throw new Error("Some Instagram conversations could not be loaded");

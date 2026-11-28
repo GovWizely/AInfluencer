@@ -71,10 +71,11 @@ export function authorizationUrl(
 }
 
 async function request<T>(url: URL, schema: z.ZodType<T>, init?: RequestInit) {
+  const timeout = AbortSignal.timeout(15_000);
   const response = await fetch(url, {
     ...init,
     cache: "no-store",
-    signal: AbortSignal.timeout(15_000),
+    signal: init?.signal ? AbortSignal.any([init.signal, timeout]) : timeout,
     redirect: "error",
   });
   if (!response.ok)
@@ -122,10 +123,16 @@ export function instagram(
     return result;
   }
 
-  function call<T>(url: URL, schema: z.ZodType<T>, body?: unknown) {
+  function call<T>(
+    url: URL,
+    schema: z.ZodType<T>,
+    body?: unknown,
+    signal?: AbortSignal,
+  ) {
     if (url.origin !== graph) throw new Error("Unexpected Instagram URL");
     url.searchParams.delete("access_token");
     return request(url, schema, {
+      signal,
       headers: {
         Authorization: `Bearer ${token}`,
         ...(body ? { "Content-Type": "application/json" } : {}),
@@ -134,12 +141,17 @@ export function instagram(
     });
   }
 
-  async function conversationCall<T>(url: URL, schema: z.ZodType<T>) {
+  async function conversationCall<T>(
+    url: URL,
+    schema: z.ZodType<T>,
+    signal?: AbortSignal,
+  ) {
+    signal?.throwIfAborted();
     await waitForConversationSlot(conversationKey);
-    return call(url, schema);
+    return call(url, schema, undefined, signal);
   }
 
-  async function* conversations(participant?: string) {
+  async function* conversations(participant?: string, signal?: AbortSignal) {
     let next: URL | undefined = url(
       "me/conversations",
       participant ? { user_id: participant } : { platform: "instagram" },
@@ -148,6 +160,7 @@ export function instagram(
       const page: z.infer<typeof conversationPage> = await conversationCall(
         next,
         conversationPage,
+        signal,
       );
       yield* page.data;
       next = page.paging?.next ? new URL(page.paging.next) : undefined;
@@ -165,14 +178,15 @@ export function instagram(
     participant: (id: string) =>
       call(url(encodeURIComponent(id), { fields: "username" }), person),
     conversations,
-    async messages(conversationId: string) {
+    async messages(conversationId: string, limit = 20, signal?: AbortSignal) {
       const thread = await conversationCall(
         url(encodeURIComponent(conversationId), {
-          fields: "messages.limit(20)",
+          fields: `messages.limit(${limit})`,
         }),
         z.object({ messages: pageSchema(idOnly).optional() }),
+        signal,
       );
-      const ids = (thread.messages?.data ?? []).slice(0, 20);
+      const ids = (thread.messages?.data ?? []).slice(0, limit);
       const messages: z.infer<typeof messageSchema>[] = [];
       for (const { id } of ids) {
         const message = await conversationCall(
@@ -180,6 +194,7 @@ export function instagram(
             fields: "id,created_time,from,to,message",
           }),
           messageSchema,
+          signal,
         ).catch(() => null);
         if (message) messages.push(message);
       }

@@ -15,10 +15,9 @@ const messages = {
   different:
     "You signed in to a different Instagram account. Try again with the account that matches your handle.",
   invalid: "Enter a valid Instagram handle, such as @yourhandle.",
-  import_failed:
-    "Your Instagram is connected, but we couldn't bring in all your messages. Connect it again to try the import once more.",
   taken: "This Instagram account is already connected to another inbox.",
-  connected: "Instagram is connected. Available messages are in your inbox.",
+  importing:
+    "Instagram is connected. It may take a few minutes for your messages to appear. Refresh your inbox to see what's new.",
   demo: "This is a sample inbox. Your Instagram account isn't connected, and no messages will be sent.",
   unavailable: "Connecting Instagram is coming soon.",
 };
@@ -83,14 +82,7 @@ export function InstagramOnboarding({
           {!guided ? <CreatorGuide /> : null}
         </div>
       ) : (
-        <details
-          open={
-            guided ||
-            status === "different" ||
-            status === "import_failed" ||
-            undefined
-          }
-        >
+        <details open={guided || status === "different" || undefined}>
           <summary className="cursor-pointer text-sm font-medium">
             {demo ? "Preview another handle" : "Connect Instagram"}
           </summary>

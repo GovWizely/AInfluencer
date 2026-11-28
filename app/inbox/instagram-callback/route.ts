@@ -1,9 +1,10 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
+import { after } from "next/server";
 
 import { requireUser } from "@/lib/auth/session";
 import { instagramConfig } from "@/lib/instagram/config";
-import { importMessages } from "@/lib/instagram/inbox";
+import { importFirstMessages, importMessages } from "@/lib/instagram/inbox";
 import { exchangeCode, instagram } from "@/lib/instagram/meta";
 import {
   connectCookie,
@@ -11,6 +12,8 @@ import {
   inboxUrl,
 } from "@/lib/instagram/onboarding";
 import { createAdminClient } from "@/lib/supabase/admin";
+
+export const maxDuration = 300;
 
 export async function GET(request: Request) {
   const user = await requireUser();
@@ -69,13 +72,27 @@ export async function GET(request: Request) {
       if (!data) {
         status = "taken";
       } else {
-        status = "import_failed";
-        await api.subscribe(profile.user_id);
-        await importMessages(
-          { id: data, external_id: profile.user_id },
-          instagram(config, credential.token, profile.user_id),
-        );
-        status = "connected";
+        const account = { id: data, external_id: profile.user_id };
+        const history = instagram(config, credential.token, profile.user_id);
+        after(async () => {
+          const results = await Promise.allSettled([
+            history.subscribe(profile.user_id),
+            importMessages(account, history),
+          ]);
+          if (results.some((result) => result.status === "rejected")) {
+            console.error(
+              "Instagram background connection or message import did not complete",
+            );
+          }
+        });
+        const signal = AbortSignal.timeout(2500);
+        await Promise.race([
+          importFirstMessages(account, history, signal).catch(() => {}),
+          new Promise<void>((resolve) =>
+            signal.addEventListener("abort", () => resolve(), { once: true }),
+          ),
+        ]);
+        status = "importing";
       }
     }
   } catch {
