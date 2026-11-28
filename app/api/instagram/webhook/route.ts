@@ -1,0 +1,74 @@
+import { instagramConfig } from "@/lib/instagram/config";
+import { messageBody, storeIncomingMessage } from "@/lib/instagram/inbox";
+import { instagram } from "@/lib/instagram/meta";
+import { parseEvents, validSignature } from "@/lib/instagram/webhook";
+import { createAdminClient } from "@/lib/supabase/admin";
+
+export function GET(request: Request) {
+  const config = instagramConfig();
+  if (!config) return new Response(null, { status: 503 });
+  const params = new URL(request.url).searchParams;
+  const challenge = params.get("hub.challenge");
+  if (
+    params.get("hub.mode") !== "subscribe" ||
+    params.get("hub.verify_token") !== config.verifyToken ||
+    challenge === null
+  ) {
+    return new Response(null, { status: 403 });
+  }
+  return new Response(challenge);
+}
+
+export async function POST(request: Request) {
+  const config = instagramConfig();
+  if (!config) return new Response(null, { status: 503 });
+  const bytes = Buffer.from(await request.arrayBuffer());
+  if (
+    !validSignature(
+      config.webhookSecret,
+      bytes,
+      request.headers.get("x-hub-signature-256"),
+    )
+  ) {
+    return new Response(null, { status: 401 });
+  }
+  let payload: unknown;
+  try {
+    payload = JSON.parse(bytes.toString("utf8"));
+  } catch {
+    return new Response(null, { status: 400 });
+  }
+  try {
+    const admin = createAdminClient();
+    for (const event of parseEvents(payload)) {
+      const result = await admin
+        .from("social_accounts")
+        .select(
+          "id, external_id, instagram_credentials!inner(access_token, expires_at)",
+        )
+        .eq("platform", "instagram")
+        .eq("external_id", event.accountId)
+        .maybeSingle();
+      if (result.error) throw result.error;
+      const account = result.data;
+      const credential = account?.instagram_credentials;
+      if (!account || !credential) continue;
+      await storeIncomingMessage(
+        account,
+        instagram(config, credential.access_token),
+        event.participantId,
+        {
+          external_id: event.messageId,
+          body: messageBody(event.text),
+          direction: event.outbound ? "outbound" : "inbound",
+          sent_by: event.outbound ? "creator" : "fan",
+          sent_at: event.sentAt,
+        },
+      );
+    }
+  } catch {
+    console.error("Instagram message could not be stored");
+    return new Response(null, { status: 503 });
+  }
+  return new Response(null, { status: 200 });
+}

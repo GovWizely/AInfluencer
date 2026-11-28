@@ -9,6 +9,9 @@ import {
 } from "@/lib/inbox/format";
 import { listAccounts, listConversations } from "@/lib/inbox/queries";
 import { accountFilterSchema } from "@/lib/inbox/schemas";
+import { isDemoAccount } from "@/lib/instagram/replies";
+
+import { InstagramOnboarding } from "./_components/instagram-onboarding";
 
 export const metadata = { title: "Inbox · AInfluencer" };
 
@@ -29,25 +32,52 @@ async function Inbox({
   searchParams,
 }: Pick<PageProps<"/inbox">, "searchParams">) {
   await requireUser();
-  const { account } = await searchParams;
+  const { account, platform, instagram, handle } = await searchParams;
+  const platformFilter = platform === "instagram" ? platform : undefined;
   const accountId = accountFilterSchema.parse(
     typeof account === "string" ? account : undefined,
   );
 
   const accounts = await listAccounts();
-  if (accounts.length === 0) return <NoAccounts />;
+  const onboarding = (
+    <InstagramOnboarding
+      empty={!accounts.length}
+      status={instagram}
+      handle={handle}
+      hasDemo={accounts.some((account) => isDemoAccount(account.external_id))}
+    />
+  );
+  if (accounts.length === 0) return onboarding;
 
   const selected = accounts.find((a) => a.id === accountId);
-  const conversations = await listConversations(selected?.id);
+  const conversations = await listConversations(selected?.id, platformFilter);
+  const platformQuery = platformFilter ? "?platform=instagram" : "";
 
   return (
     <div className="flex flex-col gap-4">
+      {onboarding}
+      <nav aria-label="Filter by platform" className="flex flex-wrap gap-2">
+        <FilterChip
+          href="/inbox"
+          active={!platformFilter}
+          label="All platforms"
+        />
+        <FilterChip
+          href="/inbox?platform=instagram"
+          active={!!platformFilter}
+          label="Instagram"
+        />
+      </nav>
       <nav aria-label="Filter by account" className="flex flex-wrap gap-2">
-        <FilterChip href="/inbox" active={!selected} label="All accounts" />
+        <FilterChip
+          href={`/inbox${platformQuery}`}
+          active={!selected}
+          label="All accounts"
+        />
         {accounts.map((a) => (
           <FilterChip
             key={a.id}
-            href={`/inbox?account=${a.id}`}
+            href={`/inbox${platformQuery ? platformQuery + "&" : "?"}account=${a.id}`}
             active={selected?.id === a.id}
             label={`@${a.handle}`}
             detail={formatFollowers(a.followers)}
@@ -147,20 +177,5 @@ function FilterChip({
       {label}
       {detail ? <span className="ml-1 opacity-60">{detail}</span> : null}
     </Link>
-  );
-}
-
-function NoAccounts() {
-  return (
-    <div className="flex flex-col gap-2 rounded-md border border-dashed border-neutral-300 p-6 dark:border-neutral-700">
-      <p className="font-medium">No accounts connected yet.</p>
-      <p className="text-sm text-neutral-500">
-        To load demo data locally, run{" "}
-        <code className="rounded bg-neutral-100 px-1 dark:bg-neutral-800">
-          pnpm seed:demo --email your@email.com
-        </code>{" "}
-        with the email you signed in with, then refresh.
-      </p>
-    </div>
   );
 }

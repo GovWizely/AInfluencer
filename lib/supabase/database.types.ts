@@ -43,6 +43,7 @@ export type Database = {
           last_inbound_at: string | null;
           last_message_at: string | null;
           last_message_preview: string | null;
+          participant_external_id: string | null;
           participant_handle: string;
           participant_name: string | null;
           read_at: string | null;
@@ -56,6 +57,7 @@ export type Database = {
           last_inbound_at?: string | null;
           last_message_at?: string | null;
           last_message_preview?: string | null;
+          participant_external_id?: string | null;
           participant_handle: string;
           participant_name?: string | null;
           read_at?: string | null;
@@ -68,6 +70,7 @@ export type Database = {
           last_inbound_at?: string | null;
           last_message_at?: string | null;
           last_message_preview?: string | null;
+          participant_external_id?: string | null;
           participant_handle?: string;
           participant_name?: string | null;
           read_at?: string | null;
@@ -77,6 +80,33 @@ export type Database = {
             foreignKeyName: "conversations_account_id_fkey";
             columns: ["account_id"];
             isOneToOne: false;
+            referencedRelation: "social_accounts";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      instagram_credentials: {
+        Row: {
+          access_token: string;
+          account_id: string;
+          expires_at: string;
+        };
+        ComputedFields: never;
+        Insert: {
+          access_token: string;
+          account_id: string;
+          expires_at: string;
+        };
+        Update: {
+          access_token?: string;
+          account_id?: string;
+          expires_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "instagram_credentials_account_id_fkey";
+            columns: ["account_id"];
+            isOneToOne: true;
             referencedRelation: "social_accounts";
             referencedColumns: ["id"];
           },
@@ -230,6 +260,18 @@ export type Database = {
       [_ in never]: never;
     };
     Functions: {
+      connect_instagram: {
+        Args: {
+          creator_id: string;
+          credential: string;
+          expiration: string;
+          follower_count: number;
+          instagram_handle: string;
+          instagram_id: string;
+          instagram_name: string;
+        };
+        Returns: string;
+      };
       owns_account: { Args: { target_account_id: string }; Returns: boolean };
       owns_conversation: {
         Args: { target_conversation_id: string };

@@ -1,6 +1,6 @@
 # AInfluencer
 
-Next.js 16 + Supabase app. This repo currently contains user login (email magic links) and a protected placeholder inbox.
+Next.js 16 + Supabase app with email sign-in and a unified inbox for Instagram messages.
 
 ## Requirements
 
@@ -24,13 +24,24 @@ After changing migrations, run `pnpm supabase:reset` and `pnpm supabase:types`.
 
 ### Demo inbox data
 
+In local development, if Instagram is not configured, sign in with a new email, enter an Instagram handle, and choose **Open sample inbox**. This loads synthetic conversations for that handle; it neither looks up a real profile nor contacts Instagram. Outside local development, an unconfigured deployment shows a coming-soon message.
+
 ```bash
 pnpm seed:demo --email you@example.com
 ```
 
-Loads 5 anonymized Instagram creators (posts plus synthetic DMs) from `supabase/fixtures/demo-instagram.json` under that login, creating the user if needed. It only runs against local Supabase and is safe to re-run. Replies typed in the inbox are stored locally and never sent to Instagram.
+The command loads 5 anonymized Instagram creators (posts plus synthetic DMs) from `supabase/fixtures/demo-instagram.json` under that login, creating the user if needed. It only runs against local Supabase and is safe to re-run. Replies to sample conversations are stored locally and never sent to Instagram.
 
 The fixture was generated once with `node scripts/build-demo-fixture.mjs <dataset.json>` from a scraped profile dataset. The raw dataset contains real accounts; don't commit it.
+
+### Instagram integration
+
+1. In the Meta App Dashboard, set up [Instagram API with Instagram Login](https://developers.facebook.com/docs/instagram-platform/instagram-api-with-instagram-login/). Set the matching `INSTAGRAM_APP_ID` and `INSTAGRAM_APP_SECRET` on the server.
+2. Set `INSTAGRAM_REDIRECT_URI` to the exact allowed OAuth redirect URI, e.g. `https://your-domain.example/inbox/instagram-callback`. Use the same HTTPS origin for sign-in and the callback so the sign-in and connection cookies are available.
+3. Configure the Instagram `messages` webhook field with callback `https://your-domain.example/api/instagram/webhook` and a random secret `INSTAGRAM_WEBHOOK_VERIFY_TOKEN`. Set `INSTAGRAM_WEBHOOK_APP_SECRET` if the Meta app secret used for signing differs from the Instagram Login app secret.
+4. Apply the migrations and set the server-only `SUPABASE_SECRET_KEY`. For accounts outside your app roles, request Meta Advanced Access for `instagram_business_basic` and `instagram_business_manage_messages`. Connected accounts must allow message access in Instagram.
+
+The app fetches the profile only after consent. It imports up to the 20 latest messages per conversation (Meta's message-detail limit); old requests or some message types may be unavailable. New DMs and replies go into the same inbox. Replies must be within 24 hours of the last incoming DM. Comments and public posts are not imported. The long-lived credentials are only accessible to the server. If access is revoked or expires, reconnect the account from the inbox.
 
 ## How auth works
 
