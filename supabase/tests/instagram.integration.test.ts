@@ -2,6 +2,8 @@ import { createHmac } from "node:crypto";
 import { afterAll, afterEach, expect, it, vi } from "vitest";
 
 import { GET, POST } from "@/app/api/instagram/webhook/route";
+import { importMessages } from "@/lib/instagram/inbox";
+import { instagram } from "@/lib/instagram/meta";
 
 import { admin, createUser, deleteUser, uniqueEmail } from "./helpers";
 
@@ -95,6 +97,54 @@ it("keeps Instagram credentials server-only and prevents another creator from cl
     body: "Not actually sent",
   });
   expect(forged.error).not.toBeNull();
+});
+
+it("imports later Instagram threads when an earlier thread is unavailable", async () => {
+  const { user, client } = await createUser(uniqueEmail("instagram-partial"));
+  users.push(user.id);
+  const externalId = uniqueEmail("instagram-account");
+  const account = await admin.rpc("connect_instagram", {
+    creator_id: user.id,
+    instagram_id: externalId,
+    instagram_handle: "creator",
+    instagram_name: "Creator",
+    follower_count: 0,
+    credential: "test-credential",
+    expiration: "2030-01-01T00:00:00Z",
+  });
+  expect(account.error).toBeNull();
+  const api = instagram(
+    {
+      appId: "",
+      appSecret: "",
+      redirectUri: "",
+      verifyToken: "",
+      webhookSecret: "",
+      version: "v27.0",
+    },
+    "unused",
+  );
+  vi.spyOn(api, "conversations").mockImplementation(async function* () {
+    yield { id: "unavailable" };
+    yield { id: "available" };
+  });
+  vi.spyOn(api, "messages")
+    .mockRejectedValueOnce(new Error("unavailable"))
+    .mockResolvedValueOnce([
+      {
+        id: "message",
+        from: { id: "fan" },
+        to: { data: [{ id: externalId }] },
+        message: "Hi!",
+        created_time: new Date().toISOString(),
+      },
+    ]);
+  await expect(
+    importMessages({ id: account.data, external_id: externalId }, api),
+  ).rejects.toThrow("Some Instagram conversations could not be loaded");
+  expect((await client.from("messages").select("body")).data).toEqual([
+    { body: "Hi!" },
+  ]);
 });
 
 it("verifies webhook challenges and stores a signed delivery once", async () => {

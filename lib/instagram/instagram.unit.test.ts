@@ -18,7 +18,10 @@ const config: InstagramConfig = {
   version: "v27.0",
 };
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.useRealTimers();
+});
 
 describe("Instagram onboarding", () => {
   it("normalizes a handle and rejects URLs", () => {
@@ -65,6 +68,7 @@ describe("Instagram onboarding", () => {
   });
 
   it("follows conversation pagination, reads message details, and sends a reply", async () => {
+    vi.useFakeTimers();
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(
@@ -91,7 +95,9 @@ describe("Instagram onboarding", () => {
       .mockResolvedValueOnce(Response.json({ message_id: "message-2" }));
     vi.stubGlobal("fetch", fetchMock);
     const api = instagram(config, "long");
-    const threads = await Array.fromAsync(api.conversations());
+    const listed = Array.fromAsync(api.conversations());
+    await vi.runAllTimersAsync();
+    const threads = await listed;
     expect(threads.map((thread) => thread.id)).toEqual([
       "thread-1",
       "thread-2",
@@ -99,7 +105,9 @@ describe("Instagram onboarding", () => {
     expect(fetchMock.mock.calls[1][0].searchParams.has("access_token")).toBe(
       false,
     );
-    expect((await api.messages(threads[0].id))[0].message).toBe("Hi!");
+    const messages = api.messages(threads[0].id);
+    await vi.runAllTimersAsync();
+    expect((await messages)[0].message).toBe("Hi!");
     expect(await api.send("creator", "fan", "Hello!")).toEqual({
       message_id: "message-2",
     });
@@ -110,12 +118,15 @@ describe("Instagram onboarding", () => {
     });
   });
 
-  it("imports available message details in batches even if an individual request fails", async () => {
+  it("paces conversation and message-detail requests even if an individual request fails", async () => {
+    vi.useFakeTimers();
     let active = 0;
     let peak = 0;
+    const started: number[] = [];
     vi.stubGlobal(
       "fetch",
       vi.fn(async (url: URL) => {
+        started.push(Date.now());
         const id = url.pathname.split("/").at(-1);
         if (id === "thread") {
           return Response.json({
@@ -139,7 +150,10 @@ describe("Instagram onboarding", () => {
         });
       }),
     );
-    const messages = await instagram(config, "long").messages("thread");
+    const first = instagram(config, "long", "creator").messages("thread");
+    const second = instagram(config, "long", "creator").messages("thread");
+    await vi.runAllTimersAsync();
+    const messages = await first;
     expect(messages.map(({ id }) => id)).toEqual([
       "message-0",
       "message-1",
@@ -150,7 +164,12 @@ describe("Instagram onboarding", () => {
       "message-7",
       "message-8",
     ]);
-    expect(peak).toBeLessThanOrEqual(4);
+    expect(await second).toEqual(messages);
+    expect(peak).toBe(1);
+    expect(started).toHaveLength(20);
+    for (let i = 1; i < started.length; i++) {
+      expect(started[i] - started[i - 1]).toBeGreaterThanOrEqual(500);
+    }
   });
 });
 

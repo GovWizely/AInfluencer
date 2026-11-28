@@ -93,7 +93,7 @@ export async function POST(request: Request) {
       }
       await storeIncomingMessage(
         account,
-        instagram(config, credential.access_token),
+        instagram(config, credential.access_token, account.external_id),
         event.participantId,
         {
           external_id: event.messageId,

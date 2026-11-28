@@ -71,7 +71,10 @@ export async function GET(request: Request) {
       } else {
         status = "import_failed";
         await api.subscribe(profile.user_id);
-        await importMessages({ id: data, external_id: profile.user_id }, api);
+        await importMessages(
+          { id: data, external_id: profile.user_id },
+          instagram(config, credential.token, profile.user_id),
+        );
         status = "connected";
       }
     }

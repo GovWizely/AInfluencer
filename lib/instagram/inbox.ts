@@ -71,8 +71,12 @@ export async function storeMessages(
 }
 
 export async function importMessages(account: Account, api: Instagram) {
+  let partial = false;
   for await (const thread of api.conversations()) {
-    const messages = await api.messages(thread.id);
+    const messages = await api.messages(thread.id).catch(() => {
+      partial = true;
+      return [];
+    });
     const participant = messages
       .flatMap((message) => [message.from, ...message.to.data])
       .find((person) => person.id !== account.external_id);
@@ -92,6 +96,8 @@ export async function importMessages(account: Account, api: Instagram) {
       }),
     );
   }
+  if (partial)
+    throw new Error("Some Instagram conversations could not be loaded");
 }
 
 export async function storeIncomingMessage(

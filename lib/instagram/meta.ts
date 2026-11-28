@@ -5,7 +5,24 @@ import { z } from "zod";
 import type { InstagramConfig } from "./config";
 
 const graph = "https://graph.instagram.com";
-const messageDetailConcurrency = 4;
+const conversationRequestIntervalMs = 510;
+const conversationSlots = new Map<string | symbol, Promise<void>>();
+
+async function waitForConversationSlot(account: string | symbol) {
+  const previous = conversationSlots.get(account) ?? Promise.resolve();
+  const next = previous.then(
+    () =>
+      new Promise<void>((resolve) =>
+        setTimeout(resolve, conversationRequestIntervalMs),
+      ),
+  );
+  conversationSlots.set(account, next);
+  void next.then(() => {
+    if (conversationSlots.get(account) === next)
+      conversationSlots.delete(account);
+  });
+  await previous;
+}
 const instagramId = z
   .union([z.string().min(1), z.number().int().safe()])
   .transform(String);
@@ -93,7 +110,12 @@ export async function exchangeCode(config: InstagramConfig, code: string) {
   };
 }
 
-export function instagram(config: InstagramConfig, token: string) {
+export function instagram(
+  config: InstagramConfig,
+  token: string,
+  accountId?: string,
+) {
+  const conversationKey = accountId ?? Symbol();
   function url(path: string, params?: Record<string, string>) {
     const result = new URL(`/${config.version}/${path}`, graph);
     result.search = new URLSearchParams(params).toString();
@@ -112,13 +134,18 @@ export function instagram(config: InstagramConfig, token: string) {
     });
   }
 
+  async function conversationCall<T>(url: URL, schema: z.ZodType<T>) {
+    await waitForConversationSlot(conversationKey);
+    return call(url, schema);
+  }
+
   async function* conversations(participant?: string) {
     let next: URL | undefined = url(
       "me/conversations",
       participant ? { user_id: participant } : { platform: "instagram" },
     );
     while (next) {
-      const page: z.infer<typeof conversationPage> = await call(
+      const page: z.infer<typeof conversationPage> = await conversationCall(
         next,
         conversationPage,
       );
@@ -139,7 +166,7 @@ export function instagram(config: InstagramConfig, token: string) {
       call(url(encodeURIComponent(id), { fields: "username" }), person),
     conversations,
     async messages(conversationId: string) {
-      const thread = await call(
+      const thread = await conversationCall(
         url(encodeURIComponent(conversationId), {
           fields: "messages.limit(20)",
         }),
@@ -147,24 +174,14 @@ export function instagram(config: InstagramConfig, token: string) {
       );
       const ids = (thread.messages?.data ?? []).slice(0, 20);
       const messages: z.infer<typeof messageSchema>[] = [];
-      for (
-        let offset = 0;
-        offset < ids.length;
-        offset += messageDetailConcurrency
-      ) {
-        const results = await Promise.allSettled(
-          ids.slice(offset, offset + messageDetailConcurrency).map(({ id }) =>
-            call(
-              url(encodeURIComponent(id), {
-                fields: "id,created_time,from,to,message",
-              }),
-              messageSchema,
-            ),
-          ),
-        );
-        for (const result of results) {
-          if (result.status === "fulfilled") messages.push(result.value);
-        }
+      for (const { id } of ids) {
+        const message = await conversationCall(
+          url(encodeURIComponent(id), {
+            fields: "id,created_time,from,to,message",
+          }),
+          messageSchema,
+        ).catch(() => null);
+        if (message) messages.push(message);
       }
       return messages;
     },
