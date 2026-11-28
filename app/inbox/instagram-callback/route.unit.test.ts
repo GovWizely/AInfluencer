@@ -55,36 +55,49 @@ vi.mock("@/lib/supabase/admin", () => ({
   }),
 }));
 
-afterEach(() => vi.restoreAllMocks());
-
-it("redirects once the first batch reaches its deadline, before importing history", async () => {
-  const controller = new AbortController();
-  vi.spyOn(AbortSignal, "timeout").mockReturnValue(controller.signal);
-  importFirstMessages.mockImplementation(async () => {
-    queueMicrotask(() => controller.abort());
-    return new Promise<void>(() => {});
-  });
-
-  const callback = new Request(
-    `https://example.test/inbox/instagram-callback?code=code&state=${state}`,
-  );
-  await expect(GET(callback)).rejects.toThrow(
-    "/inbox?instagram=importing&handle=creator",
-  );
-  expect(AbortSignal.timeout).toHaveBeenCalledWith(2500);
-  expect(importFirstMessages).toHaveBeenCalledOnce();
-  expect(importMessages).not.toHaveBeenCalled();
-  expect(subscribe).not.toHaveBeenCalled();
-
-  const subscription = Promise.withResolvers<void>();
-  subscribe.mockReturnValueOnce(subscription.promise);
-  const background = after.mock.calls[0][0]();
-  expect(subscribe).toHaveBeenCalledWith("instagram-id");
-  expect(importMessages).not.toHaveBeenCalled();
-  subscription.resolve();
-  await background;
-  expect(importMessages).toHaveBeenCalledWith(
-    { id: "account-id", external_id: "instagram-id" },
-    expect.anything(),
-  );
+afterEach(() => {
+  vi.clearAllMocks();
+  vi.restoreAllMocks();
 });
+
+it.each([true, false])(
+  "redirects before importing history (subscription succeeds: %s)",
+  async (subscribed) => {
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    const controller = new AbortController();
+    vi.spyOn(AbortSignal, "timeout").mockReturnValue(controller.signal);
+    importFirstMessages.mockImplementation(async () => {
+      queueMicrotask(() => controller.abort());
+      return new Promise<void>(() => {});
+    });
+
+    const callback = new Request(
+      `https://example.test/inbox/instagram-callback?code=code&state=${state}`,
+    );
+    await expect(GET(callback)).rejects.toThrow(
+      "/inbox?instagram=importing&handle=creator",
+    );
+    expect(AbortSignal.timeout).toHaveBeenCalledWith(2500);
+    expect(importFirstMessages).toHaveBeenCalledOnce();
+    expect(importMessages).not.toHaveBeenCalled();
+    expect(subscribe).not.toHaveBeenCalled();
+
+    const subscription = Promise.withResolvers<void>();
+    subscribe.mockReturnValueOnce(subscription.promise);
+    const background = after.mock.calls[0][0]();
+    expect(subscribe).toHaveBeenCalledWith("instagram-id");
+    expect(importMessages).not.toHaveBeenCalled();
+    if (subscribed) subscription.resolve();
+    else subscription.reject(new Error("Subscription failed"));
+    await background;
+    expect(importMessages).toHaveBeenCalledWith(
+      { id: "account-id", external_id: "instagram-id" },
+      expect.anything(),
+    );
+    if (subscribed) expect(log).not.toHaveBeenCalled();
+    else
+      expect(log).toHaveBeenCalledWith(
+        "Instagram message delivery could not be activated",
+      );
+  },
+);

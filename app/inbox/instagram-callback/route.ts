@@ -77,10 +77,14 @@ export async function GET(request: Request) {
         after(async () => {
           try {
             await history.subscribe(profile.user_id);
+          } catch {
+            console.error("Instagram message delivery could not be activated");
+          }
+          try {
             await importMessages(account, history);
           } catch {
             console.error(
-              "Instagram background connection or message import did not complete",
+              "Instagram background message import did not complete",
             );
           }
         });
