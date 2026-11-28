@@ -33,9 +33,16 @@ describe("Instagram onboarding", () => {
     expect(url.origin).toBe("https://www.instagram.com");
     expect(url.searchParams.get("state")).toBe("nonce");
     expect(url.searchParams.get("redirect_uri")).toBe(config.redirectUri);
+    expect(url.searchParams.has("force_reauth")).toBe(false);
     expect(url.searchParams.get("scope")).toBe(
       "instagram_business_basic,instagram_business_manage_messages",
     );
+  });
+
+  it("forces a fresh sign-in when retrying after a handle mismatch", () => {
+    expect(
+      authorizationUrl(config, "nonce", true).searchParams.get("force_reauth"),
+    ).toBe("true");
   });
 
   it("exchanges the code for a long-lived credential", async () => {

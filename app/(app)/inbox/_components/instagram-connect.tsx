@@ -10,15 +10,20 @@ import { connectInstagram } from "../connect";
 export function InstagramConnect({
   handle,
   demo,
+  forceReauth,
 }: {
   handle: string;
   demo: boolean;
+  forceReauth: boolean;
 }) {
   const [value, setValue] = useState(handle);
   const parsed = handleSchema.safeParse(value);
 
   return (
     <form action={connectInstagram} className="flex max-w-sm flex-col gap-3">
+      {forceReauth ? (
+        <input type="hidden" name="forceReauth" value="true" />
+      ) : null}
       <div className="flex flex-col gap-1">
         <label htmlFor="instagram-handle" className="text-sm font-medium">
           Instagram handle

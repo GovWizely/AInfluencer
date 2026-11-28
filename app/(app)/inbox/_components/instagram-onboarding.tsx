@@ -52,6 +52,7 @@ export function InstagramOnboarding({
         key={pendingHandle.data}
         handle={pendingHandle.data ?? ""}
         demo={demo}
+        forceReauth={status === "different"}
       />
     ) : (
       <p className="text-sm text-neutral-500">
@@ -82,7 +83,14 @@ export function InstagramOnboarding({
           {!guided ? <CreatorGuide /> : null}
         </div>
       ) : (
-        <details open={guided || status === "import_failed" || undefined}>
+        <details
+          open={
+            guided ||
+            status === "different" ||
+            status === "import_failed" ||
+            undefined
+          }
+        >
           <summary className="cursor-pointer text-sm font-medium">
             {demo ? "Preview another handle" : "Connect Instagram"}
           </summary>

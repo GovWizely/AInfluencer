@@ -66,5 +66,7 @@ export async function connectInstagram(form: FormData) {
       path: "/",
     },
   );
-  redirect(authorizationUrl(config, state).href);
+  redirect(
+    authorizationUrl(config, state, form.get("forceReauth") === "true").href,
+  );
 }

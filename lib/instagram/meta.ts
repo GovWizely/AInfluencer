@@ -35,7 +35,11 @@ const messageSchema = idOnly.extend({
   message: z.string().nullable().optional(),
 });
 
-export function authorizationUrl(config: InstagramConfig, state: string) {
+export function authorizationUrl(
+  config: InstagramConfig,
+  state: string,
+  forceReauth = false,
+) {
   const url = new URL("https://www.instagram.com/oauth/authorize");
   url.search = new URLSearchParams({
     client_id: config.appId,
@@ -43,6 +47,7 @@ export function authorizationUrl(config: InstagramConfig, state: string) {
     response_type: "code",
     scope: "instagram_business_basic,instagram_business_manage_messages",
     enable_fb_login: "false",
+    ...(forceReauth ? { force_reauth: "true" } : {}),
     state,
   }).toString();
   return url;
