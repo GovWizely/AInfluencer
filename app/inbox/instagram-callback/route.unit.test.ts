@@ -76,10 +76,15 @@ it("redirects once the first batch reaches its deadline, before importing histor
   expect(importMessages).not.toHaveBeenCalled();
   expect(subscribe).not.toHaveBeenCalled();
 
-  await after.mock.calls[0][0]();
+  const subscription = Promise.withResolvers<void>();
+  subscribe.mockReturnValueOnce(subscription.promise);
+  const background = after.mock.calls[0][0]();
+  expect(subscribe).toHaveBeenCalledWith("instagram-id");
+  expect(importMessages).not.toHaveBeenCalled();
+  subscription.resolve();
+  await background;
   expect(importMessages).toHaveBeenCalledWith(
     { id: "account-id", external_id: "instagram-id" },
     expect.anything(),
   );
-  expect(subscribe).toHaveBeenCalledWith("instagram-id");
 });

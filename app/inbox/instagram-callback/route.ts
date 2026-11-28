@@ -75,11 +75,10 @@ export async function GET(request: Request) {
         const account = { id: data, external_id: profile.user_id };
         const history = instagram(config, credential.token, profile.user_id);
         after(async () => {
-          const results = await Promise.allSettled([
-            history.subscribe(profile.user_id),
-            importMessages(account, history),
-          ]);
-          if (results.some((result) => result.status === "rejected")) {
+          try {
+            await history.subscribe(profile.user_id);
+            await importMessages(account, history);
+          } catch {
             console.error(
               "Instagram background connection or message import did not complete",
             );
