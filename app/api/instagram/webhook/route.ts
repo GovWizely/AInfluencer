@@ -8,6 +8,29 @@ import { instagram } from "@/lib/instagram/meta";
 import { parseEvents, validSignature } from "@/lib/instagram/webhook";
 import { createAdminClient } from "@/lib/supabase/admin";
 
+const maxBodyBytes = 1024 * 1024;
+
+async function readBody(request: Request) {
+  const reader = request.body?.getReader();
+  if (!reader) return Buffer.alloc(0);
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) return Buffer.concat(chunks, size);
+      size += value.byteLength;
+      if (size > maxBodyBytes) {
+        void reader.cancel().catch(() => {});
+        return null;
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+}
+
 export function GET(request: Request) {
   const config = instagramConfig();
   if (!config) return new Response(null, { status: 503 });
@@ -26,16 +49,19 @@ export function GET(request: Request) {
 export async function POST(request: Request) {
   const config = instagramConfig();
   if (!config) return new Response(null, { status: 503 });
-  const bytes = Buffer.from(await request.arrayBuffer());
-  if (
-    !validSignature(
-      config.webhookSecret,
-      bytes,
-      request.headers.get("x-hub-signature-256"),
-    )
-  ) {
-    return new Response(null, { status: 401 });
+  const signature = request.headers.get("x-hub-signature-256");
+  if (!signature) return new Response(null, { status: 401 });
+  if (Number(request.headers.get("content-length")) > maxBodyBytes)
+    return new Response(null, { status: 413 });
+  let bytes: Buffer | null;
+  try {
+    bytes = await readBody(request);
+  } catch {
+    return new Response(null, { status: 400 });
   }
+  if (!bytes) return new Response(null, { status: 413 });
+  if (!validSignature(config.webhookSecret, bytes, signature))
+    return new Response(null, { status: 401 });
   let payload: unknown;
   try {
     payload = JSON.parse(bytes.toString("utf8"));

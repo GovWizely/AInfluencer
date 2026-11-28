@@ -107,6 +107,23 @@ it("verifies webhook challenges and stores a signed delivery once", async () => 
   );
   vi.stubEnv("INSTAGRAM_WEBHOOK_VERIFY_TOKEN", "verify");
   const webhook = "https://example.test/api/instagram/webhook";
+  const unsigned = new Request(webhook, { method: "POST", body: "unsigned" });
+  expect((await POST(unsigned)).status).toBe(401);
+  expect(unsigned.bodyUsed).toBe(false);
+  const signedHeaders = { "x-hub-signature-256": `sha256=${"0".repeat(64)}` };
+  const reportedOversize = new Request(webhook, {
+    method: "POST",
+    body: "oversize",
+    headers: { ...signedHeaders, "content-length": "1048577" },
+  });
+  expect((await POST(reportedOversize)).status).toBe(413);
+  expect(reportedOversize.bodyUsed).toBe(false);
+  const actualOversize = new Request(webhook, {
+    method: "POST",
+    body: "x".repeat(1048577),
+    headers: signedHeaders,
+  });
+  expect((await POST(actualOversize)).status).toBe(413);
   expect(
     await GET(
       new Request(
