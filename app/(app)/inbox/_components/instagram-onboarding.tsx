@@ -79,7 +79,7 @@ export function InstagramOnboarding({
           </p>
           {guided ? <CreatorGuide open /> : null}
           {form}
-          {enabled && !guided ? <CreatorGuide /> : null}
+          {!guided ? <CreatorGuide /> : null}
         </div>
       ) : (
         <details open={guided || status === "import_failed" || undefined}>
@@ -89,7 +89,7 @@ export function InstagramOnboarding({
           <div className="mt-3 flex flex-col gap-4">
             {guided ? <CreatorGuide open /> : null}
             {form}
-            {enabled && !guided ? <CreatorGuide /> : null}
+            {!guided ? <CreatorGuide /> : null}
           </div>
         </details>
       )}
@@ -117,9 +117,7 @@ function CreatorGuide({ open }: { open?: boolean }) {
           <strong>Creator</strong> and follow the prompts. Creator accounts are
           public.
         </li>
-        <li>
-          Come back here and choose <strong>Connect Instagram</strong> again.
-        </li>
+        <li>Come back here to connect Instagram when you&apos;re ready.</li>
       </ol>
     </details>
   );
