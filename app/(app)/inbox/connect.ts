@@ -14,9 +14,9 @@ import {
   handleSchema,
   inboxUrl,
 } from "@/lib/instagram/onboarding";
+import { sampleInbox } from "@/lib/instagram/sample-inbox";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { isLocalSupabaseUrl, seedDemo } from "@/scripts/demo/seed.mjs";
-import demo from "@/supabase/fixtures/demo-instagram.json";
 
 export async function connectInstagram(form: FormData) {
   const user = await requireUser();
@@ -31,21 +31,7 @@ export async function connectInstagram(form: FormData) {
       isLocalSupabaseUrl(publicEnv.NEXT_PUBLIC_SUPABASE_URL)
     ) {
       try {
-        const sample = demo.accounts.find(
-          (account) => account.conversations.length > 0,
-        );
-        if (!sample) throw new Error("No sample conversations available");
-        await seedDemo(createAdminClient(), user.id, {
-          accounts: [
-            {
-              ...sample,
-              key: `preview:${handle.data}`,
-              handle: handle.data,
-              display_name: null,
-              bio: null,
-            },
-          ],
-        });
+        await seedDemo(createAdminClient(), user.id, sampleInbox(handle.data));
       } catch {
         redirect(inboxUrl("failed", handle.data));
       }

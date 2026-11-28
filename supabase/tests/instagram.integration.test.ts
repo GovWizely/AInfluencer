@@ -38,6 +38,64 @@ it("populates a new local inbox with sample conversations for the submitted hand
   expect(accounts.data).toEqual([{ handle: "example.creator" }]);
   const messages = await client.from("messages").select("id");
   expect(messages.data?.length).toBeGreaterThan(0);
+
+  async function preview(handle: string) {
+    requireUser.mockResolvedValueOnce(user);
+    const form = new FormData();
+    form.set("handle", handle);
+    await expect(connectInstagram(form)).rejects.toThrow(
+      "/inbox?instagram=demo",
+    );
+  }
+
+  async function readSamples() {
+    const { data, error } = await client
+      .from("conversations")
+      .select("id, participant_handle, account_id, messages(id, body)")
+      .order("id");
+    if (error) throw error;
+    return data;
+  }
+
+  const first = await readSamples();
+  await preview("@another.creator");
+  const otherAccount = await client
+    .from("social_accounts")
+    .select("id")
+    .eq("handle", "another.creator")
+    .single();
+  expect(otherAccount.error).toBeNull();
+  const unified = await readSamples();
+  const second = unified.filter(
+    ({ account_id }) => account_id === otherAccount.data?.id,
+  );
+  expect(second.length).toBeGreaterThan(0);
+  expect(unified).toHaveLength(first.length + second.length);
+  const firstFans = new Set(
+    first.map(({ participant_handle }) => participant_handle),
+  );
+  const firstBodies = new Set(
+    first.flatMap(({ messages }) => messages.map(({ body }) => body)),
+  );
+  expect(
+    second.every(
+      ({ participant_handle }) => !firstFans.has(participant_handle),
+    ),
+  ).toBe(true);
+  expect(
+    second
+      .flatMap(({ messages }) => messages)
+      .every(({ body }) => !firstBodies.has(body)),
+  ).toBe(true);
+
+  await preview("@EXAMPLE.Creator");
+  const repeated = await readSamples();
+  const stable = (rows: Awaited<ReturnType<typeof readSamples>>) =>
+    rows.map((row) => ({
+      ...row,
+      messages: row.messages.toSorted((a, b) => a.id.localeCompare(b.id)),
+    }));
+  expect(stable(repeated)).toEqual(stable(unified));
 });
 
 it("keeps Instagram credentials server-only and prevents another creator from claiming the same account", async () => {
