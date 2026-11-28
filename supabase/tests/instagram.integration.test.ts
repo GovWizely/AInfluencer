@@ -1,0 +1,428 @@
+import { createHmac } from "node:crypto";
+import { afterAll, afterEach, expect, it, vi } from "vitest";
+
+import { GET, POST } from "@/app/api/instagram/webhook/route";
+import { importMessages } from "@/lib/instagram/inbox";
+import { instagram } from "@/lib/instagram/meta";
+import { handleSchema } from "@/lib/instagram/onboarding";
+import { sampleInbox } from "@/lib/instagram/sample-inbox";
+
+import { admin, createUser, deleteUser, uniqueEmail } from "./helpers";
+
+const users: string[] = [];
+const requireUser = vi.hoisted(() => vi.fn());
+vi.mock("server-only", () => ({}));
+vi.mock("@/lib/auth/session", () => ({ requireUser }));
+vi.mock("next/navigation", () => ({
+  redirect: (path: string): never => {
+    throw new Error(path);
+  },
+}));
+vi.mock("@/lib/supabase/admin", async () => ({
+  createAdminClient: () => admin,
+}));
+afterEach(() => vi.unstubAllEnvs());
+afterAll(async () => {
+  await Promise.all(users.map(deleteUser));
+});
+
+it("populates a new local inbox with sample conversations for the submitted handle", async () => {
+  vi.stubEnv("NODE_ENV", "development");
+  vi.stubEnv("INSTAGRAM_APP_ID", "");
+  const { user, client } = await createUser(uniqueEmail("instagram-demo"));
+  users.push(user.id);
+  requireUser.mockResolvedValueOnce(user);
+  const { connectInstagram } = await import("@/app/(app)/inbox/connect");
+  const form = new FormData();
+  form.set("handle", "@example.creator");
+  await expect(connectInstagram(form)).rejects.toThrow("/inbox?instagram=demo");
+  const accounts = await client.from("social_accounts").select("handle");
+  expect(accounts.data).toEqual([{ handle: "example.creator" }]);
+  const messages = await client.from("messages").select("id");
+  expect(messages.data?.length).toBeGreaterThan(0);
+
+  async function preview(handle: string) {
+    requireUser.mockResolvedValueOnce(user);
+    const form = new FormData();
+    form.set("handle", handle);
+    await expect(connectInstagram(form)).rejects.toThrow(
+      "/inbox?instagram=demo",
+    );
+  }
+
+  async function readSamples() {
+    const { data, error } = await client
+      .from("conversations")
+      .select(
+        "id, external_id, participant_handle, account_id, messages(id, body, sent_at)",
+      )
+      .order("id");
+    if (error) throw error;
+    return data;
+  }
+
+  const first = await readSamples();
+  await preview("@another.creator");
+  const otherAccount = await client
+    .from("social_accounts")
+    .select("id")
+    .eq("handle", "another.creator")
+    .single();
+  expect(otherAccount.error).toBeNull();
+  const unified = await readSamples();
+  const second = unified.filter(
+    ({ account_id }) => account_id === otherAccount.data?.id,
+  );
+  expect(second.length).toBeGreaterThan(0);
+  expect(unified).toHaveLength(first.length + second.length);
+  const senderHandles = unified.map(
+    ({ participant_handle }) => participant_handle,
+  );
+  expect(new Set(senderHandles).size).toBe(unified.length);
+  for (const handle of senderHandles) {
+    expect(handleSchema.safeParse(handle).success).toBe(true);
+    expect(handle).not.toMatch(/\.[a-f0-9]{10}$/i);
+  }
+  const firstFans = new Set(
+    first.map(({ participant_handle }) => participant_handle),
+  );
+  const firstBodies = new Set(
+    first.flatMap(({ messages }) => messages.map(({ body }) => body)),
+  );
+  expect(
+    second.every(
+      ({ participant_handle }) => !firstFans.has(participant_handle),
+    ),
+  ).toBe(true);
+  expect(
+    second
+      .flatMap(({ messages }) => messages)
+      .every(({ body }) => !firstBodies.has(body)),
+  ).toBe(true);
+
+  await preview("@EXAMPLE.Creator");
+  const repeated = await readSamples();
+  const stable = (rows: Awaited<ReturnType<typeof readSamples>>) =>
+    rows.map((row) => ({
+      ...row,
+      messages: row.messages.toSorted((a, b) => a.id.localeCompare(b.id)),
+    }));
+  expect(stable(repeated)).toEqual(stable(unified));
+
+  const [original, missing] = first;
+  const reply = await client
+    .from("messages")
+    .insert({
+      conversation_id: original.id,
+      direction: "outbound",
+      sent_by: "creator",
+      body: "This is a reply to the original sample sender.",
+    })
+    .select("id")
+    .single();
+  expect(reply.error).toBeNull();
+  await preview(`@${original.participant_handle}`);
+  const removed = await admin
+    .from("conversations")
+    .delete()
+    .eq("id", missing.id);
+  expect(removed.error).toBeNull();
+
+  const beforeReopen = stable(await readSamples());
+  await preview("@example.creator");
+  const afterReopen = stable(await readSamples());
+  const preserved = afterReopen.find((thread) => thread.id === original.id);
+  expect(preserved?.participant_handle).toBe(original.participant_handle);
+  expect(preserved?.messages.map((message) => message.id)).toContain(
+    reply.data?.id,
+  );
+  const restored = afterReopen.find(
+    (thread) =>
+      thread.account_id === missing.account_id &&
+      thread.external_id === missing.external_id,
+  );
+  expect(restored?.messages.length).toBeGreaterThan(0);
+  expect(restored?.id).not.toBe(missing.id);
+  expect(afterReopen.filter((thread) => thread.id !== restored?.id)).toEqual(
+    beforeReopen,
+  );
+});
+
+it("does not use the creator's own Instagram handles for sample senders", async () => {
+  vi.stubEnv("NODE_ENV", "development");
+  vi.stubEnv("INSTAGRAM_APP_ID", "");
+  const { user, client } = await createUser(
+    uniqueEmail("instagram-preview-owner"),
+  );
+  users.push(user.id);
+  const handle = "ana.costa";
+  const [connectedHandle, previewHandle] = sampleInbox(handle, [])
+    .accounts[0].conversations.map((thread) => thread.participant_handle)
+    .filter((sender) => sender !== `${handle}_2`);
+  const { error } = await admin.from("social_accounts").insert([
+    {
+      owner_id: user.id,
+      platform: "instagram",
+      external_id: `instagram:${user.id}`,
+      handle: connectedHandle.toUpperCase(),
+    },
+    {
+      owner_id: user.id,
+      platform: "instagram",
+      external_id: `demo:${user.id}:preview:${previewHandle}`,
+      handle: previewHandle,
+    },
+  ]);
+  expect(error).toBeNull();
+
+  requireUser.mockResolvedValueOnce(user);
+  const { connectInstagram } = await import("@/app/(app)/inbox/connect");
+  const form = new FormData();
+  form.set("handle", `@${handle}`);
+  await expect(connectInstagram(form)).rejects.toThrow("/inbox?instagram=demo");
+  const conversations = await client
+    .from("conversations")
+    .select("participant_handle");
+  expect(conversations.error).toBeNull();
+  const senders = conversations.data?.map((row) => row.participant_handle);
+  expect(senders).toContain(`${handle}_2`);
+  expect(senders).not.toContain(handle);
+  expect(senders).not.toContain(connectedHandle);
+  expect(senders).not.toContain(previewHandle);
+});
+
+it("keeps Instagram credentials server-only and prevents another creator from claiming the same account", async () => {
+  const alice = await createUser(uniqueEmail("instagram-alice"));
+  users.push(alice.user.id);
+  const bob = await createUser(uniqueEmail("instagram-bob"));
+  users.push(bob.user.id);
+  const args = {
+    creator_id: alice.user.id,
+    instagram_id: uniqueEmail("instagram-account"),
+    instagram_handle: "creator",
+    instagram_name: "Creator",
+    follower_count: 23,
+    credential: "test-credential",
+    expiration: "2030-01-01T00:00:00Z",
+  };
+  const created = await admin.rpc("connect_instagram", args);
+  expect(created.error).toBeNull();
+  expect(created.data).toBeTypeOf("string");
+
+  const stolen = await admin.rpc("connect_instagram", {
+    ...args,
+    creator_id: bob.user.id,
+    credential: "other",
+  });
+  expect(stolen.error).toBeNull();
+  expect(stolen.data).toBeNull();
+  expect(
+    (await bob.client.rpc("connect_instagram", args)).error,
+  ).not.toBeNull();
+  expect(
+    (await alice.client.from("instagram_credentials").select("access_token"))
+      .error,
+  ).not.toBeNull();
+  const { data: credential } = await admin
+    .from("instagram_credentials")
+    .select("access_token")
+    .eq("account_id", created.data)
+    .single();
+  expect(credential?.access_token).toBe(args.credential);
+
+  const thread = await admin
+    .from("conversations")
+    .insert({
+      account_id: created.data,
+      external_id: "thread",
+      participant_handle: "reader",
+      participant_external_id: "fan",
+    })
+    .select("id")
+    .single();
+  expect(thread.error).toBeNull();
+  const forged = await alice.client.from("messages").insert({
+    conversation_id: thread.data?.id,
+    direction: "outbound",
+    sent_by: "creator",
+    body: "Not actually sent",
+  });
+  expect(forged.error).not.toBeNull();
+});
+
+it("imports later Instagram threads when an earlier thread is unavailable", async () => {
+  const { user, client } = await createUser(uniqueEmail("instagram-partial"));
+  users.push(user.id);
+  const externalId = uniqueEmail("instagram-account");
+  const account = await admin.rpc("connect_instagram", {
+    creator_id: user.id,
+    instagram_id: externalId,
+    instagram_handle: "creator",
+    instagram_name: "Creator",
+    follower_count: 0,
+    credential: "test-credential",
+    expiration: "2030-01-01T00:00:00Z",
+  });
+  expect(account.error).toBeNull();
+  const api = instagram(
+    {
+      appId: "",
+      appSecret: "",
+      redirectUri: "",
+      verifyToken: "",
+      webhookSecret: "",
+      version: "v27.0",
+    },
+    "unused",
+  );
+  vi.spyOn(api, "conversations").mockImplementation(async function* () {
+    yield { id: "unavailable" };
+    yield { id: "available" };
+  });
+  vi.spyOn(api, "messages")
+    .mockRejectedValueOnce(new Error("unavailable"))
+    .mockResolvedValueOnce([
+      {
+        id: "message",
+        from: { id: "fan" },
+        to: { data: [{ id: externalId }] },
+        message: "Hi!",
+        created_time: new Date().toISOString(),
+      },
+    ]);
+  await expect(
+    importMessages({ id: account.data, external_id: externalId }, api),
+  ).rejects.toThrow("Some Instagram conversations could not be loaded");
+  expect((await client.from("messages").select("body")).data).toEqual([
+    { body: "Hi!" },
+  ]);
+});
+
+it("verifies webhook challenges and stores a signed delivery once", async () => {
+  vi.stubEnv("INSTAGRAM_APP_ID", "test-app");
+  vi.stubEnv("INSTAGRAM_APP_SECRET", "test-signing-secret");
+  vi.stubEnv("INSTAGRAM_WEBHOOK_APP_SECRET", "");
+  vi.stubEnv(
+    "INSTAGRAM_REDIRECT_URI",
+    "https://example.test/inbox/instagram-callback",
+  );
+  vi.stubEnv("INSTAGRAM_WEBHOOK_VERIFY_TOKEN", "verify");
+  const webhook = "https://example.test/api/instagram/webhook";
+  const unsigned = new Request(webhook, { method: "POST", body: "unsigned" });
+  expect((await POST(unsigned)).status).toBe(401);
+  expect(unsigned.bodyUsed).toBe(false);
+  const signedHeaders = { "x-hub-signature-256": `sha256=${"0".repeat(64)}` };
+  const reportedOversize = new Request(webhook, {
+    method: "POST",
+    body: "oversize",
+    headers: { ...signedHeaders, "content-length": "1048577" },
+  });
+  expect((await POST(reportedOversize)).status).toBe(413);
+  expect(reportedOversize.bodyUsed).toBe(false);
+  const actualOversize = new Request(webhook, {
+    method: "POST",
+    body: "x".repeat(1048577),
+    headers: signedHeaders,
+  });
+  expect((await POST(actualOversize)).status).toBe(413);
+  expect(
+    await GET(
+      new Request(
+        `${webhook}?hub.mode=subscribe&hub.verify_token=verify&hub.challenge=123`,
+      ),
+    ).text(),
+  ).toBe("123");
+  expect(
+    GET(
+      new Request(
+        `${webhook}?hub.mode=subscribe&hub.verify_token=bad&hub.challenge=123`,
+      ),
+    ).status,
+  ).toBe(403);
+
+  const { user, client } = await createUser(uniqueEmail("instagram-webhook"));
+  users.push(user.id);
+  const instagramId = uniqueEmail("instagram-account");
+  const account = await admin.rpc("connect_instagram", {
+    creator_id: user.id,
+    instagram_id: instagramId,
+    instagram_handle: "creator",
+    instagram_name: "Creator",
+    follower_count: 0,
+    credential: "test-credential",
+    expiration: "2030-01-01T00:00:00Z",
+  });
+  expect(account.error).toBeNull();
+  const thread = await admin
+    .from("conversations")
+    .insert({
+      account_id: account.data,
+      external_id: "thread",
+      participant_handle: "reader",
+      participant_external_id: "fan",
+    })
+    .select("id")
+    .single();
+  expect(thread.error).toBeNull();
+  const body = JSON.stringify({
+    object: "instagram",
+    entry: [
+      {
+        id: instagramId,
+        messaging: [
+          {
+            sender: { id: "fan" },
+            recipient: { id: instagramId },
+            timestamp: Date.now(),
+            message: { mid: "test-message", text: "Hi!" },
+          },
+        ],
+      },
+    ],
+  });
+  const signature = `sha256=${createHmac("sha256", "test-signing-secret").update(body).digest("hex")}`;
+  const deliver = (value: string) =>
+    POST(
+      new Request(webhook, {
+        method: "POST",
+        body,
+        headers: { "x-hub-signature-256": value },
+      }),
+    );
+  expect((await deliver("invalid")).status).toBe(401);
+  expect((await deliver(signature)).status).toBe(200);
+  expect((await deliver(signature)).status).toBe(200);
+  const messages = await client
+    .from("messages")
+    .select("external_id, body, direction")
+    .eq("conversation_id", thread.data?.id);
+  expect(messages.data).toEqual([
+    { external_id: "test-message", body: "Hi!", direction: "inbound" },
+  ]);
+  const unsent = body.replace('"text":"Hi!"', '"is_deleted":true');
+  const unsentSignature = `sha256=${createHmac("sha256", "test-signing-secret").update(unsent).digest("hex")}`;
+  expect(
+    (
+      await POST(
+        new Request(webhook, {
+          method: "POST",
+          body: unsent,
+          headers: { "x-hub-signature-256": unsentSignature },
+        }),
+      )
+    ).status,
+  ).toBe(200);
+  expect((await deliver(signature)).status).toBe(200);
+  const redacted = await client
+    .from("messages")
+    .select("body")
+    .eq("conversation_id", thread.data?.id)
+    .single();
+  expect(redacted.data?.body).toBe("This message was unsent on Instagram.");
+  const preview = await client
+    .from("conversations")
+    .select("last_message_preview")
+    .eq("id", thread.data?.id)
+    .single();
+  expect(preview.data?.last_message_preview).toBe(redacted.data?.body);
+});

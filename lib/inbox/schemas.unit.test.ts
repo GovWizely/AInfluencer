@@ -37,6 +37,19 @@ describe("replySchema", () => {
       replySchema.safeParse({ conversationId: "1", body: "hi" }).success,
     ).toBe(false);
   });
+
+  it("counts the UTF-8 size of replies with emoji", () => {
+    expect(
+      replySchema.safeParse({ conversationId, body: "🙂".repeat(250) }).success,
+    ).toBe(true);
+    const reply = replySchema.safeParse({
+      conversationId,
+      body: "🙂".repeat(250) + "a",
+    });
+    expect(reply.error?.issues[0]?.message).toBe(
+      "Your reply is too long to send. Shorten it and try again.",
+    );
+  });
 });
 
 describe("accountFilterSchema", () => {

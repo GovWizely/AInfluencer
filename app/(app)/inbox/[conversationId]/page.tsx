@@ -6,6 +6,12 @@ import { z } from "zod";
 import { requireUser } from "@/lib/auth/session";
 import { formatRelativeTime, isUnread } from "@/lib/inbox/format";
 import { getConversation } from "@/lib/inbox/queries";
+import {
+  closedWindowMessage,
+  isDemoAccount,
+  replyWindowMs,
+  replyWindowOpen,
+} from "@/lib/instagram/replies";
 
 import { sendReply } from "../actions";
 import { MarkRead } from "../_components/mark-read";
@@ -42,6 +48,11 @@ async function Conversation({
 
   const name =
     conversation.participant_name || `@${conversation.participant_handle}`;
+  const demo = isDemoAccount(conversation.account.external_id);
+  const replyUntil =
+    !demo && conversation.last_inbound_at
+      ? Date.parse(conversation.last_inbound_at) + replyWindowMs
+      : undefined;
 
   return (
     <>
@@ -83,10 +94,19 @@ async function Conversation({
         })}
       </ol>
 
-      <ReplyForm
-        action={sendReply.bind(null, conversation.id)}
-        participant={name}
-      />
+      {demo || replyWindowOpen(conversation.last_inbound_at) ? (
+        <ReplyForm
+          key={replyUntil}
+          action={sendReply.bind(null, conversation.id)}
+          participant={name}
+          demo={demo}
+          replyUntil={replyUntil}
+        />
+      ) : (
+        <p className="rounded-md bg-neutral-100 p-4 text-sm dark:bg-neutral-800">
+          {closedWindowMessage}
+        </p>
+      )}
     </>
   );
 }
