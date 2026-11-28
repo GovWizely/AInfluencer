@@ -40,7 +40,7 @@ export function parseEvents(payload: unknown) {
       const parsed = messaging.safeParse(candidate);
       if (!parsed.success) return [];
       const { message, sender, recipient, timestamp } = parsed.data;
-      if (!message || message.is_deleted) return [];
+      if (!message) return [];
       const outbound = sender.id === entry.id;
       if (
         (!outbound && recipient.id !== entry.id) ||
@@ -52,6 +52,7 @@ export function parseEvents(payload: unknown) {
           accountId: entry.id,
           participantId: outbound ? recipient.id : sender.id,
           messageId: message.mid,
+          deleted: message.is_deleted === true,
           text: message.text,
           sentAt: new Date(timestamp).toISOString(),
           outbound,

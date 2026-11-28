@@ -1,5 +1,9 @@
 import { instagramConfig } from "@/lib/instagram/config";
-import { messageBody, storeIncomingMessage } from "@/lib/instagram/inbox";
+import {
+  messageBody,
+  redactUnsentMessage,
+  storeIncomingMessage,
+} from "@/lib/instagram/inbox";
 import { instagram } from "@/lib/instagram/meta";
 import { parseEvents, validSignature } from "@/lib/instagram/webhook";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -53,6 +57,14 @@ export async function POST(request: Request) {
       const account = result.data;
       const credential = account?.instagram_credentials;
       if (!account || !credential) continue;
+      if (event.deleted) {
+        await redactUnsentMessage(
+          account.id,
+          event.participantId,
+          event.messageId,
+        );
+        continue;
+      }
       await storeIncomingMessage(
         account,
         instagram(config, credential.access_token),

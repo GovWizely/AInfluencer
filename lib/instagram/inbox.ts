@@ -123,3 +123,27 @@ export async function storeIncomingMessage(
   }
   throw new Error("Instagram conversation is not available yet");
 }
+
+export async function redactUnsentMessage(
+  accountId: string,
+  participantId: string,
+  messageId: string,
+) {
+  const admin = createAdminClient();
+  const threads = await admin
+    .from("conversations")
+    .select("id")
+    .eq("account_id", accountId)
+    .eq("participant_external_id", participantId);
+  if (threads.error) throw threads.error;
+  if (!threads.data.length) return;
+  const { error } = await admin
+    .from("messages")
+    .update({ body: "This message was unsent on Instagram." })
+    .in(
+      "conversation_id",
+      threads.data.map(({ id }) => id),
+    )
+    .eq("external_id", messageId);
+  if (error) throw error;
+}

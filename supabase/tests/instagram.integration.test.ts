@@ -181,4 +181,30 @@ it("verifies webhook challenges and stores a signed delivery once", async () => 
   expect(messages.data).toEqual([
     { external_id: "test-message", body: "Hi!", direction: "inbound" },
   ]);
+  const unsent = body.replace('"text":"Hi!"', '"is_deleted":true');
+  const unsentSignature = `sha256=${createHmac("sha256", "test-signing-secret").update(unsent).digest("hex")}`;
+  expect(
+    (
+      await POST(
+        new Request(webhook, {
+          method: "POST",
+          body: unsent,
+          headers: { "x-hub-signature-256": unsentSignature },
+        }),
+      )
+    ).status,
+  ).toBe(200);
+  expect((await deliver(signature)).status).toBe(200);
+  const redacted = await client
+    .from("messages")
+    .select("body")
+    .eq("conversation_id", thread.data?.id)
+    .single();
+  expect(redacted.data?.body).toBe("This message was unsent on Instagram.");
+  const preview = await client
+    .from("conversations")
+    .select("last_message_preview")
+    .eq("id", thread.data?.id)
+    .single();
+  expect(preview.data?.last_message_preview).toBe(redacted.data?.body);
 });
