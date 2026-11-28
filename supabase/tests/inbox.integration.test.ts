@@ -1,7 +1,8 @@
 import { readFileSync } from "node:fs";
 
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
+import { getConversation } from "@/lib/inbox/queries";
 import { findOrCreateUser, seedDemo } from "@/scripts/demo/seed.mjs";
 
 import {
@@ -13,6 +14,9 @@ import {
 } from "./helpers";
 
 const created: string[] = [];
+const createClient = vi.hoisted(() => vi.fn());
+vi.mock("server-only", () => ({}));
+vi.mock("@/lib/supabase/server", () => ({ createClient }));
 
 afterAll(async () => {
   await Promise.all(created.map(deleteUser));
@@ -73,6 +77,28 @@ async function conversationFor(ownerId: string) {
   if (error) throw error;
   return data;
 }
+
+it("loads the latest 100 messages and displays them oldest to newest", async () => {
+  const { user, client } = await setupUser("inbox-long-thread");
+  await seedDemo(admin, user.id, smallFixture);
+  const thread = await conversationFor(user.id);
+  const { error } = await admin.from("messages").insert(
+    Array.from({ length: 102 }, (_, n) => ({
+      conversation_id: thread.id,
+      external_id: `new-${n}`,
+      direction: "inbound",
+      sent_by: "fan",
+      body: `message ${n}`,
+      sent_at: new Date(Date.now() + n * 1000).toISOString(),
+    })),
+  );
+  expect(error).toBeNull();
+  createClient.mockResolvedValueOnce(client);
+  const conversation = await getConversation(thread.id);
+  expect(conversation?.messages.map(({ body }) => body)).toEqual(
+    Array.from({ length: 100 }, (_, n) => `message ${n + 2}`),
+  );
+});
 
 describe("inbox RLS", () => {
   let alice: Awaited<ReturnType<typeof setupUser>>;

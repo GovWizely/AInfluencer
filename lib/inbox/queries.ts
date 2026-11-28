@@ -42,8 +42,10 @@ export async function getConversation(id: string) {
       "id, participant_handle, participant_name, last_inbound_at, read_at, account:social_accounts!inner(id, handle, display_name, external_id), messages(id, direction, sent_by, body, sent_at)",
     )
     .eq("id", id)
-    .order("sent_at", { referencedTable: "messages", ascending: true })
+    .order("sent_at", { referencedTable: "messages", ascending: false })
+    .order("id", { referencedTable: "messages", ascending: false })
+    .limit(100, { referencedTable: "messages" })
     .maybeSingle();
   if (error) throw new Error(`Failed to load conversation: ${error.message}`);
-  return data;
+  return data && { ...data, messages: data.messages.toReversed() };
 }
